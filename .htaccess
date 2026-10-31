@@ -1,0 +1,12 @@
+RewriteEngine On
+RewriteBase /
+
+# Não reescreve arquivos e pastas físicas existentes
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Regra para sub-páginas do lojista: /slug/admin
+RewriteRule ^([a-zA-Z0-9_-]+)/admin/?$ index.php?tenant=$1&pagina=admin [QSA,L]
+
+# Regra para URLs simples: /slug, /master-admin, /admin-lojista
+RewriteRule ^([a-zA-Z0-9_-]+)/?$ index.php?tenant=$1 [QSA,L]
