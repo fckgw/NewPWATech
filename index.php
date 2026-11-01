@@ -189,10 +189,14 @@ try {
     $_SESSION['current_tenant_id'] = (int)$loja['user_id'];
 
     // ------------------------------------------------------
-    // 4.1: PAINEL DA LOJA
+    // 4.1: PAINEL ADMINISTRATIVO DO LOJISTA
     // URL: /{user_virtual_env}/admin
     // ------------------------------------------------------
-    if ($pagina === 'admin') {
+    // Detecta se a rota atual é de administração (por GET ou pela URI)
+    $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+    $isAdminRoute = ($pagina === 'admin') || str_contains($uriPath, "/admin");
+
+    if ($isAdminRoute) {
         $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
         if ($acao === 'logout') {
@@ -201,39 +205,64 @@ try {
             exit;
         }
 
-        if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-            $email = trim($_POST['email'] ?? '');
-            $senha = trim($_POST['senha'] ?? '');
-
-            if (strtolower($email) === strtolower(trim($loja['user_email'])) && Auth::verificarSenha($senha, $loja['user_password'])) {
-                Auth::loginLojista($loja);
-                session_write_close();
-                header("Location: /{$tenantSlug}/admin");
-                exit;
-            } else {
-                header("Location: /{$tenantSlug}/admin?erro=credenciais_invalidas");
-                exit;
-            }
-        }
-
+        // Se não estiver logado para este tenant, exibe a tela de login
         if (!Auth::isLojistaLoggedIn((int)$loja['user_id'])) {
             include __DIR__ . "/views/{$pastaLogista}/login.php";
             exit;
         }
 
-        $dashPath = __DIR__ . "/views/{$pastaLogista}/dashboard.php";
-        if (file_exists($dashPath)) {
-            include $dashPath;
-        } else {
-            echo "<h2>Painel da Loja: " . htmlspecialchars($loja['user_name']) . "</h2>";
-            echo "<p><a href='/" . htmlspecialchars($loja['user_virtual_env']) . "'>Ver Cardápio Público</a></p>";
-            echo "<p><a href='/" . htmlspecialchars($loja['user_virtual_env']) . "/admin?acao=logout'>Sair</a></p>";
+        require_once __DIR__ . '/app/controllers/LojistaController.php';
+        $lojistaCtrl = new LojistaController();
+
+        // 1. Extração segura da sub-seção:
+        // Prioridade 1: Query string (?secao=produtos)
+        // Prioridade 2: Sub-path na URL (/admin/produtos)
+        $subSecao = $_GET['secao'] ?? ($_GET['p'] ?? '');
+
+        if (empty($subSecao)) {
+            // Se a URL for /hugolanches/admin/produtos, pega a última parte
+            $partesUri = explode('/', trim($uriPath, '/'));
+            $posAdmin = array_search('admin', $partesUri);
+            if ($posAdmin !== false && isset($partesUri[$posAdmin + 1])) {
+                $subSecao = $partesUri[$posAdmin + 1];
+            }
+        }
+
+        // Se ainda estiver vazio ou for "admin", abre o dashboard kanban
+        if (empty($subSecao) || $subSecao === 'admin') {
+            $subSecao = 'dashboard';
+        }
+
+        // Roteamento para o método correspondente no LojistaController
+        switch ($subSecao) {
+            case 'produtos':
+                $lojistaCtrl->produtos($loja);
+                break;
+            case 'categorias':
+                $lojistaCtrl->categorias($loja);
+                break;
+            case 'taxas':
+                $lojistaCtrl->taxas($loja);
+                break;
+            case 'horarios':
+                $lojistaCtrl->horarios($loja);
+                break;
+            case 'configuracoes':
+                $lojistaCtrl->configuracoes($loja);
+                break;
+            case 'clientes':
+                $lojistaCtrl->clientes($loja);
+                break;
+            case 'dashboard':
+            default:
+                $lojistaCtrl->dashboard($loja);
+                break;
         }
         exit;
     }
 
     // ------------------------------------------------------
-    // 4.2: CARDÁPIO PWA DO CLIENTE FINAL
+    // 4.2: CARDÁPIO PWA DO CLIENTE FINAL (Link Público da Loja)
     // URL: /{user_virtual_env} (Ex: /hugolanches)
     // ------------------------------------------------------
     $ctrlFile = is_file(__DIR__ . '/app/controllers/HomeController.php')
@@ -247,4 +276,5 @@ try {
 
 } catch (Exception $e) {
     include __DIR__ . '/views/site/erro_critico.php';
+    exit;
 }

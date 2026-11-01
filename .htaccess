@@ -1,12 +1,15 @@
 RewriteEngine On
 RewriteBase /
 
-# Não reescreve arquivos e pastas físicas existentes
+# Não reescreve arquivos ou diretórios físicos que já existem
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 
-# Regra para sub-páginas do lojista: /slug/admin
+# 1. Sub-seções amigáveis do painel do lojista: /slug/admin/produtos, /slug/admin/clientes, etc.
+RewriteRule ^([a-zA-Z0-9_-]+)/admin/([a-zA-Z0-9_-]+)/?$ index.php?tenant=$1&pagina=admin&secao=$2 [QSA,L]
+
+# 2. Painel principal do lojista: /slug/admin
 RewriteRule ^([a-zA-Z0-9_-]+)/admin/?$ index.php?tenant=$1&pagina=admin [QSA,L]
 
-# Regra para URLs simples: /slug, /master-admin, /admin-lojista
+# 3. Rotas de 1 nível: /slug (cardápio), /master-admin, /admin-lojista
 RewriteRule ^([a-zA-Z0-9_-]+)/?$ index.php?tenant=$1 [QSA,L]
