@@ -239,5 +239,46 @@ function renderCardPedido($p, $nomeLoja, $fase) {
 ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- ÁUDIO DO TOQUE DE TELEFONE / NOTIFICAÇÃO DE NOVO PEDIDO -->
+<audio id="audioCampainha" preload="auto">
+    <!-- Som de telefone antigo tocando / campainha de delivery -->
+    <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+</audio>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    // Polling contínuo: checa novos pedidos a cada 4 segundos
+    setInterval(function() {
+        fetch('/<?= $loja['user_virtual_env'] ?>?acao_loja=checar_novos_pedidos')
+        .then(r => r.json())
+        .then(data => {
+            if (data.tem_novos && data.pedidos.length > 0) {
+                // Toca o som do telefone
+                var audio = document.getElementById('audioCampainha');
+                if (audio) {
+                    audio.play().catch(e => console.log("Interação necessária para reproduzir áudio"));
+                }
+
+                // Notificação visual com SweetAlert2
+                var p = data.pedidos[0];
+                Swal.fire({
+                    icon: 'warning',
+                    title: '🔔 NOVO PEDIDO RECEBIDO!',
+                    html: `<b>Pedido:</b> #${p.codigo_pedido}<br><b>Cliente:</b> ${p.nome}<br><b>Total:</b> R$ ${parseFloat(p.total).toFixed(2)}`,
+                    background: '#1b2e4b',
+                    color: '#fff',
+                    confirmButtonColor: '#34af23',
+                    confirmButtonText: 'Ver Pedido no Kanban'
+                }).then(() => {
+                    window.location.reload();
+                });
+            }
+        })
+        .catch(e => {});
+    }, 4000);
+</script>
+
+
 </body>
 </html>

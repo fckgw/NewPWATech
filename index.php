@@ -1,8 +1,9 @@
 <?php
 /**
- * DIGITAL PWA - Roteador Centralizado Pro
+ * DIGITAL PWA - Roteador Centralizado Pro (Multi-Tenant MVC)
  * Master: ws_admin (admin_email, admin_senha)
  * Lojista: ws_users (user_email, user_password, user_virtual_env)
+ * Cliente: ws_clientes (telefone, senha)
  */
 session_start();
 error_reporting(E_ALL);
@@ -16,7 +17,7 @@ $dbFile = is_file(__DIR__ . '/app/Database/Conexao.php')
     : __DIR__ . '/app/database/Conexao.php';
 
 if (!file_exists($dbFile)) {
-    die("Erro: Arquivo Conexao.php não encontrado.");
+    die("Erro Crítico: Arquivo Conexao.php não encontrado.");
 }
 require_once $dbFile;
 
@@ -25,21 +26,30 @@ $authFile = is_file(__DIR__ . '/app/Security/Auth.php')
     : __DIR__ . '/app/security/Auth.php';
 
 if (!file_exists($authFile)) {
-    die("Erro: Arquivo Auth.php não encontrado.");
+    die("Erro Crítico: Arquivo Auth.php não encontrado.");
 }
 require_once $authFile;
 
+// Detecção dinâmica de pastas (evita divergência de maiúsculas/minúsculas no Linux)
 $pastaLogista = is_dir(__DIR__ . '/views/admin_logista') ? 'admin_logista' : 'admin_lojista';
 
+// Extração segura de parâmetros da URL e URI
 $tenantSlug = $_GET['tenant'] ?? '';
 $pagina     = $_GET['pagina'] ?? 'home';
+$uriPath    = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 
 // ==========================================================
-// ROTA 1: LANDING PAGE (Home Principal)
+// ROTA 1: LANDING PAGE INSTITUCIONAL (Home Raiz)
 // URL: /
 // ==========================================================
 if (empty($tenantSlug)) {
-    include __DIR__ . '/views/site/landing.php';
+    $landingPath = __DIR__ . '/views/site/landing.php';
+    if (file_exists($landingPath)) {
+        include $landingPath;
+    } else {
+        echo "<h1 style='font-family:sans-serif;'>PWA Food Platform</h1>";
+        echo "<p><a href='/master-admin'>Login Master</a> | <a href='/admin-lojista'>Login Lojista</a></p>";
+    }
     exit;
 }
 
@@ -50,6 +60,7 @@ if (empty($tenantSlug)) {
 if ($tenantSlug === 'master-admin') {
     $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
+    // Processamento do Formulário de Login Master
     if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email'] ?? '');
         $senha = trim($_POST['senha'] ?? '');
@@ -61,15 +72,13 @@ if ($tenantSlug === 'master-admin') {
 
         try {
             $db = Conexao::getConexao();
-
-            // Busca pelo admin_email na tabela ws_admin
             $stmt = $db->prepare("SELECT * FROM ws_admin WHERE TRIM(LOWER(admin_email)) = TRIM(LOWER(?)) LIMIT 1");
             $stmt->execute([$email]);
             $admin = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($admin && Auth::verificarSenha($senha, $admin['admin_senha'])) {
                 
-                // Se a senha estiver em MD5 antigo (32 chars), migra para SHA-256 automaticamente
+                // Migração transparente de MD5 (32 chars) para SHA-256 no banco
                 if (strlen(trim($admin['admin_senha'])) === 32) {
                     $up = $db->prepare("UPDATE ws_admin SET admin_senha = ? WHERE admin_id = ?");
                     $up->execute([Auth::hashSenha($senha), $admin['admin_id']]);
@@ -88,36 +97,42 @@ if ($tenantSlug === 'master-admin') {
         }
     }
 
+    // Logout Master
     if ($acao === 'logout') {
         Auth::logout();
         header("Location: /master-admin");
         exit;
     }
 
+    // Controle de Acesso
     if (!Auth::isMasterLoggedIn()) {
         include __DIR__ . '/views/admin_master/login.php';
         exit;
     }
 
+    // Telas do Painel Logado
     if (file_exists(__DIR__ . '/views/admin_master/gerenciar_lojas.php')) {
         include __DIR__ . '/views/admin_master/gerenciar_lojas.php';
     } elseif (file_exists(__DIR__ . '/views/admin_master/dashboard.php')) {
         include __DIR__ . '/views/admin_master/dashboard.php';
     } else {
+        echo "<div style='font-family:sans-serif; padding:40px;'>";
         echo "<h2>Painel Master Autenticado!</h2>";
         echo "<p>E-mail: " . htmlspecialchars($_SESSION['master_email'] ?? '') . "</p>";
-        echo "<a href='/master-admin?acao=logout'>Sair</a>";
+        echo "<a href='/master-admin?acao=logout' style='color:red;'>Sair</a>";
+        echo "</div>";
     }
     exit;
 }
 
 // ==========================================================
-// ROTA 3: LOGIN DO LOJISTA (Tabela ws_users)
+// ROTA 3: LOGIN CENTRALIZADO DO LOJISTA (Tabela ws_users)
 // URL: /admin-lojista
 // ==========================================================
 if ($tenantSlug === 'admin-lojista') {
     $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
+    // Processamento do Formulário de Login do Lojista
     if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email'] ?? '');
         $senha = trim($_POST['senha'] ?? '');
@@ -129,15 +144,13 @@ if ($tenantSlug === 'admin-lojista') {
 
         try {
             $db = Conexao::getConexao();
-
-            // Busca na ws_users por user_email
             $stmt = $db->prepare("SELECT * FROM ws_users WHERE TRIM(LOWER(user_email)) = TRIM(LOWER(?)) LIMIT 1");
             $stmt->execute([$email]);
             $lojista = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($lojista && Auth::verificarSenha($senha, $lojista['user_password'])) {
 
-                // Validação de status caso exista preenchido
+                // Bloqueia se inativo
                 if (!empty($lojista['user_status']) && strtolower(trim($lojista['user_status'])) !== 'ativo') {
                     header("Location: /admin-lojista?erro=inativo");
                     exit;
@@ -152,7 +165,7 @@ if ($tenantSlug === 'admin-lojista') {
                 Auth::loginLojista($lojista);
                 session_write_close();
 
-                // Redireciona diretamente para o slug da loja (Ex: /hugolanches/admin)
+                // Redireciona diretamente para o painel exclusivo daquela loja
                 $slug = trim($lojista['user_virtual_env']);
                 header("Location: /" . $slug . "/admin");
                 exit;
@@ -181,6 +194,7 @@ try {
     $stmt->execute([$tenantSlug]);
     $loja = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    // Se o slug não existir em ws_users
     if (!$loja) {
         header("Location: /?erro=loja_nao_encontrada");
         exit;
@@ -189,38 +203,118 @@ try {
     $_SESSION['current_tenant_id'] = (int)$loja['user_id'];
 
     // ------------------------------------------------------
-    // 4.1: PAINEL ADMINISTRATIVO DO LOJISTA
+    // 4.1: API DO PEDIDO - GRAVAÇÃO DIRETA NA BASE DE DADOS
+    // URL: /{user_virtual_env}?acao_cliente=salvar_pedido
+    // ------------------------------------------------------
+    if (isset($_GET['acao_cliente']) && $_GET['acao_cliente'] === 'salvar_pedido') {
+        require_once __DIR__ . '/app/controllers/ClienteController.php';
+        $cliCtrl = new ClienteController();
+        $cliCtrl->salvarPedido($loja);
+        exit;
+    }
+
+    // ------------------------------------------------------
+    // 4.2: POLLING DO ALARME SONORO DO DASHBOARD DO LOJISTA
+    // URL: /{user_virtual_env}?acao_loja=checar_novos_pedidos
+    // ------------------------------------------------------
+    if (isset($_GET['acao_loja']) && $_GET['acao_loja'] === 'checar_novos_pedidos') {
+        if (ob_get_length()) ob_clean();
+        header('Content-Type: application/json; charset=utf-8');
+
+        $stmtNovos = $db->prepare("SELECT id, codigo_pedido, nome, total FROM ws_pedidos WHERE user_id = ? AND view = 0 ORDER BY id DESC");
+        $stmtNovos->execute([(int)$loja['user_id']]);
+        $novos = $stmtNovos->fetchAll(PDO::FETCH_ASSOC);
+
+        if (!empty($novos)) {
+            $up = $db->prepare("UPDATE ws_pedidos SET view = 1 WHERE user_id = ? AND view = 0");
+            $up->execute([(int)$loja['user_id']]);
+        }
+
+        echo json_encode(['tem_novos' => !empty($novos), 'pedidos' => $novos], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // ------------------------------------------------------
+    // 4.3: SUB-ROTAS DE LOGIN, CADASTRO E LOGOUT DO CONSUMIDOR
+    // URL: /{user_virtual_env}?acao_cliente=login | registrar | logout
+    // ------------------------------------------------------
+    if (isset($_GET['acao_cliente']) || $pagina === 'cliente') {
+        require_once __DIR__ . '/app/controllers/ClienteController.php';
+        $cliCtrl = new ClienteController();
+        $acaoCli = $_GET['acao_cliente'] ?? ($_GET['sub'] ?? 'login');
+
+        if ($acaoCli === 'registrar') {
+            $cliCtrl->registrar($loja);
+        } elseif ($acaoCli === 'logout') {
+            $cliCtrl->logout($loja);
+        } else {
+            $cliCtrl->login($loja);
+        }
+        exit;
+    }
+
+    // ------------------------------------------------------
+    // 4.4: TELA DE COZINHA / KDS (PEDIDOS EM PREPARO)
+    // URL: /{user_virtual_env}/cozinha
+    // ------------------------------------------------------
+    if ($pagina === 'cozinha' || str_contains($uriPath, "/cozinha")) {
+        if (file_exists(__DIR__ . '/views/cozinha/pedidos.php')) {
+            include __DIR__ . '/views/cozinha/pedidos.php';
+        } elseif (file_exists(__DIR__ . '/views/cozinha/index.php')) {
+            include __DIR__ . '/views/cozinha/index.php';
+        } else {
+            echo "<h2 style='font-family:sans-serif; padding:30px;'>Tela de Cozinha (KDS) em desenvolvimento.</h2>";
+        }
+        exit;
+    }
+
+    // ------------------------------------------------------
+    // 4.5: PAINEL ADMINISTRATIVO DO LOJISTA
     // URL: /{user_virtual_env}/admin
     // ------------------------------------------------------
-    // Detecta se a rota atual é de administração (por GET ou pela URI)
-    $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
     $isAdminRoute = ($pagina === 'admin') || str_contains($uriPath, "/admin");
 
     if ($isAdminRoute) {
         $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
+        // Logout exclusivo do lojista
         if ($acao === 'logout') {
             Auth::logout();
             header("Location: /admin-lojista");
             exit;
         }
 
-        // Se não estiver logado para este tenant, exibe a tela de login
+        // Submissão do login direto do tenant (caso tente logar via /{slug}/admin)
+        if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+            $email = trim($_POST['email'] ?? '');
+            $senha = trim($_POST['senha'] ?? '');
+
+            if (strtolower($email) === strtolower(trim($loja['user_email'])) && Auth::verificarSenha($senha, $loja['user_password'])) {
+                Auth::loginLojista($loja);
+                session_write_close();
+                header("Location: /{$tenantSlug}/admin");
+                exit;
+            } else {
+                header("Location: /{$tenantSlug}/admin?erro=credenciais_invalidas");
+                exit;
+            }
+        }
+
+        // Bloqueia e exibe a tela de login se não estiver logado para este tenant
         if (!Auth::isLojistaLoggedIn((int)$loja['user_id'])) {
             include __DIR__ . "/views/{$pastaLogista}/login.php";
             exit;
         }
 
+        // Carrega o Controller do Lojista
         require_once __DIR__ . '/app/controllers/LojistaController.php';
         $lojistaCtrl = new LojistaController();
 
-        // 1. Extração segura da sub-seção:
-        // Prioridade 1: Query string (?secao=produtos)
-        // Prioridade 2: Sub-path na URL (/admin/produtos)
+        // Extração robusta da sub-seção:
+        // Suporta tanto Query String (?secao=produtos) quanto URLs amigáveis (/admin/produtos)
         $subSecao = $_GET['secao'] ?? ($_GET['p'] ?? '');
 
         if (empty($subSecao)) {
-            // Se a URL for /hugolanches/admin/produtos, pega a última parte
             $partesUri = explode('/', trim($uriPath, '/'));
             $posAdmin = array_search('admin', $partesUri);
             if ($posAdmin !== false && isset($partesUri[$posAdmin + 1])) {
@@ -228,12 +322,11 @@ try {
             }
         }
 
-        // Se ainda estiver vazio ou for "admin", abre o dashboard kanban
         if (empty($subSecao) || $subSecao === 'admin') {
             $subSecao = 'dashboard';
         }
 
-        // Roteamento para o método correspondente no LojistaController
+        // Mapeamento completo de todas as seções administrativas
         switch ($subSecao) {
             case 'produtos':
                 $lojistaCtrl->produtos($loja);
@@ -262,12 +355,16 @@ try {
     }
 
     // ------------------------------------------------------
-    // 4.2: CARDÁPIO PWA DO CLIENTE FINAL (Link Público da Loja)
+    // 4.6: CARDÁPIO DIGITAL DO CLIENTE FINAL (PWA)
     // URL: /{user_virtual_env} (Ex: /hugolanches)
     // ------------------------------------------------------
     $ctrlFile = is_file(__DIR__ . '/app/controllers/HomeController.php')
         ? __DIR__ . '/app/controllers/HomeController.php'
         : __DIR__ . '/app/Controllers/HomeController.php';
+
+    if (!file_exists($ctrlFile)) {
+        die("Erro Crítico: HomeController.php não foi localizado em 'app/controllers/'.");
+    }
 
     require_once $ctrlFile;
     $controller = new HomeController();
@@ -275,6 +372,15 @@ try {
     exit;
 
 } catch (Exception $e) {
-    include __DIR__ . '/views/site/erro_critico.php';
+    $erroCriticoPath = __DIR__ . '/views/site/erro_critico.php';
+    if (file_exists($erroCriticoPath)) {
+        include $erroCriticoPath;
+    } else {
+        die("<div style='font-family:sans-serif; padding:40px; background:#fff3cd; color:#856404;'>
+                <h3>Erro no Servidor</h3>
+                <p>" . htmlspecialchars($e->getMessage()) . "</p>
+                <p><a href='javascript:history.back()'>Voltar</a></p>
+             </div>");
+    }
     exit;
 }
