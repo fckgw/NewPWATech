@@ -8,7 +8,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <!-- SweetAlert2 Moderno -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
@@ -19,7 +18,6 @@
         }
         body { background-color: var(--bg-body); font-family: 'Plus Jakarta Sans', sans-serif; color: #fff; min-height: 100vh; }
         
-        /* Sidebar Completa e Padronizada */
         .sidebar { background: #060818; min-height: 100vh; padding: 25px 15px; border-right: 1px solid rgba(255,255,255,0.05); }
         .nav-link { color: #888ea8; border-radius: 12px; margin-bottom: 6px; padding: 12px 18px; font-weight: 600; transition: 0.3s; }
         .nav-link:hover, .nav-link.active { background: #34af23; color: #fff; }
@@ -29,6 +27,18 @@
         .form-control:focus, .form-select:focus { background-color: rgba(255,255,255,0.08); border-color: #34af23; color: #fff; box-shadow: none; }
         
         .prod-thumb { width: 55px; height: 55px; border-radius: 14px; object-fit: cover; }
+        .prod-thumb-fallback {
+            width: 55px;
+            height: 55px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888ea8;
+            font-size: 1.3rem;
+            border: 1px dashed rgba(255,255,255,0.15);
+        }
         .btn-action { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; border: none; }
     </style>
 </head>
@@ -37,7 +47,7 @@
 <div class="container-fluid">
     <div class="row">
 
-        <!-- SIDEBAR COMPLETA (PADRÃO DO DASHBOARD) -->
+        <!-- SIDEBAR COMPLETA -->
         <aside class="col-md-2 sidebar d-flex flex-column justify-content-between">
             <div>
                 <div class="text-center mb-4">
@@ -96,15 +106,30 @@
                                 <tr><td colspan="6" class="text-center py-4 text-secondary">Nenhum produto cadastrado até o momento.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($produtos as $p): 
-                                    $imgSrc = (!empty($p['img_item']) && $p['img_item'] !== 'false') ? "/uploads/{$p['img_item']}" : "/img/burger.png";
+                                    $temImgFisica = false;
+                                    $imgUrl = '';
+                                    if (!empty($p['img_item']) && $p['img_item'] !== 'false') {
+                                        $caminhoFisico = __DIR__ . '/../../uploads/' . $p['img_item'];
+                                        if (file_exists($caminhoFisico)) {
+                                            $temImgFisica = true;
+                                            $imgUrl = '/uploads/' . htmlspecialchars($p['img_item']);
+                                        }
+                                    }
                                 ?>
                                     <tr id="linha-prod-<?= $p['id'] ?>">
                                         <td>
-                                            <img src="<?= htmlspecialchars($imgSrc) ?>" class="prod-thumb shadow-sm" onerror="this.src='/img/burger.png'">
+                                            <?php if ($temImgFisica): ?>
+                                                <img src="<?= $imgUrl ?>" class="prod-thumb shadow-sm" alt="Foto"
+                                                     onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\'prod-thumb-fallback\'><i class=\'fas fa-hamburger\'></i></div>';">
+                                            <?php else: ?>
+                                                <div class="prod-thumb-fallback">
+                                                    <i class="fas fa-hamburger"></i>
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
                                         <td>
                                             <b class="text-white"><?= htmlspecialchars($p['nome_item']) ?></b><br>
-                                            <small class="text-secondary"><?= htmlspecialchars($p['descricao_item']) ?></small>
+                                            <small class="text-secondary"><?= htmlspecialchars($p['descricao_item'] ?? '') ?></small>
                                         </td>
                                         <td><span class="badge bg-secondary bg-opacity-50"><?= htmlspecialchars($p['nome_cat'] ?? 'Geral') ?></span></td>
                                         <td class="text-success fw-bold">R$ <?= number_format($p['preco_item'], 2, ',', '.') ?></td>
@@ -211,7 +236,7 @@ function editarProduto(p) {
     document.getElementById('prod_nome').value = p.nome_item;
     document.getElementById('prod_cat').value = p.id_cat;
     document.getElementById('prod_preco').value = parseFloat(p.preco_item).toFixed(2).replace('.', ',');
-    document.getElementById('prod_desc').value = p.descricao_item;
+    document.getElementById('prod_desc').value = p.descricao_item || '';
     document.getElementById('prod_disp').checked = (parseInt(p.disponivel) === 1);
     document.getElementById('modalTitulo').innerText = "Editar Produto: " + p.nome_item;
 
@@ -249,7 +274,6 @@ function salvarProdutoAjax(e) {
                 confirmButtonColor: '#34af23',
                 confirmButtonText: 'OK'
             }).then(() => {
-                // Atualiza a tabela suavemente sem sair da tela
                 window.location.reload();
             });
         } else {
