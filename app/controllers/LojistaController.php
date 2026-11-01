@@ -46,7 +46,7 @@ class LojistaController {
     /**
      * Dashboard Principal com Kanban de Pedidos & Faturamento
      */
-    public function dashboard(array $loja): void {
+     public function dashboard(array $loja): void {
         $userId = (int)$loja['user_id'];
         $db = $this->db;
 
@@ -58,9 +58,7 @@ class LojistaController {
             $up = $db->prepare("UPDATE ws_pedidos SET status = ? WHERE id = ? AND user_id = ?");
             $up->execute([$novoStatus, $pedidoId, $userId]);
 
-            // Se for requisição AJAX, responde em JSON
             if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-                // Busca o pedido atualizado para gerar o link do WhatsApp
                 $stmtP = $db->prepare("SELECT * FROM ws_pedidos WHERE id = ?");
                 $stmtP->execute([$pedidoId]);
                 $pedAtualizado = $stmtP->fetch(PDO::FETCH_ASSOC);
@@ -75,9 +73,34 @@ class LojistaController {
             exit;
         }
 
-        // Filtros de pesquisa de pedidos
+        // Endpoint AJAX para buscar histórico passado com filtros
+        if (isset($_GET['ajax_historico'])) {
+            header('Content-Type: application/json');
+            $dtIni = !empty($_GET['dt_ini']) ? $_GET['dt_ini'] . ' 00:00:00' : date('Y-m-01 00:00:00');
+            $dtFim = !empty($_GET['dt_fim']) ? $_GET['dt_fim'] . ' 23:59:59' : date('Y-m-d 23:59:59');
+            $stFiltro = trim($_GET['status_hist'] ?? '');
+
+            $sqlH = "SELECT * FROM ws_pedidos WHERE user_id = ? AND data BETWEEN ? AND ?";
+            $paramsH = [$userId, $dtIni, $dtFim];
+
+            if (!empty($stFiltro)) {
+                $sqlH .= " AND LOWER(status) = LOWER(?)";
+                $paramsH[] = $stFiltro;
+            }
+
+            $sqlH .= " ORDER BY data DESC LIMIT 500";
+            $stmtH = $db->prepare($sqlH);
+            $stmtH->execute($paramsH);
+            $historico = $stmtH->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode($historico);
+            exit;
+        }
+
+        // Filtros da Tela Principal (Data Início, Data Fim, Busca e Status)
         $filtroStatus = trim($_GET['status'] ?? '');
-        $filtroData   = trim($_GET['data'] ?? '');
+        $dataInicio   = trim($_GET['data_inicio'] ?? '');
+        $dataFim      = trim($_GET['data_fim'] ?? '');
         $filtroBusca  = trim($_GET['busca'] ?? '');
 
         $sql = "SELECT * FROM ws_pedidos WHERE user_id = ?";
@@ -87,10 +110,18 @@ class LojistaController {
             $sql .= " AND LOWER(status) = LOWER(?)";
             $params[] = $filtroStatus;
         }
-        if (!empty($filtroData)) {
-            $sql .= " AND DATE(data) = ?";
-            $params[] = $filtroData;
+        if (!empty($dataInicio) && !empty($dataFim)) {
+            $sql .= " AND data BETWEEN ? AND ?";
+            $params[] = $dataInicio . ' 00:00:00';
+            $params[] = $dataFim . ' 23:59:59';
+        } elseif (!empty($dataInicio)) {
+            $sql .= " AND data >= ?";
+            $params[] = $dataInicio . ' 00:00:00';
+        } elseif (!empty($dataFim)) {
+            $sql .= " AND data <= ?";
+            $params[] = $dataFim . ' 23:59:59';
         }
+
         if (!empty($filtroBusca)) {
             $sql .= " AND (codigo_pedido LIKE ? OR nome LIKE ? OR telefone LIKE ?)";
             $params[] = "%{$filtroBusca}%";
@@ -98,19 +129,23 @@ class LojistaController {
             $params[] = "%{$filtroBusca}%";
         }
 
-        $sql .= " ORDER BY id DESC LIMIT 100";
+        $sql .= " ORDER BY id DESC LIMIT 150";
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
         $pedidos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Agrupamento para as 4 Fases do Kanban
-        $faseRecebido  = [];
-        $faseAndamento = [];
-        $faseEntrega   = [];
-        $faseFinalizado= [];
+        // Agrupamento para as 4 Fases
+        $faseRecebido   = [];
+        $faseAndamento  = [];
+        $faseEntrega    = [];
+        $faseFinalizado = [];
+
+        $hoje = date('Y-m-d');
 
         foreach ($pedidos as $p) {
             $st = strtolower(trim($p['status']));
+            $dataPed = date('Y-m-d', strtotime($p['data']));
+
             if ($st === 'aberto' || $st === 'recebido') {
                 $faseRecebido[] = $p;
             } elseif ($st === 'em andamento' || $st === 'em preparo') {
@@ -118,11 +153,14 @@ class LojistaController {
             } elseif ($st === 'saiu para entrega' || $st === 'em rota') {
                 $faseEntrega[] = $p;
             } else {
-                $faseFinalizado[] = $p;
+                // REGRA: Finalizados na tela principal exibe APENAS os do dia atual
+                if ($dataPed === $hoje || !empty($dataInicio)) {
+                    $faseFinalizado[] = $p;
+                }
             }
         }
 
-        // Estatísticas Rápidas
+        // Estatísticas
         $stmtVendasHoje = $db->prepare("SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as qtd FROM ws_pedidos WHERE user_id = ? AND DATE(data) = CURDATE()");
         $stmtVendasHoje->execute([$userId]);
         $statsHoje = $stmtVendasHoje->fetch(PDO::FETCH_ASSOC);
