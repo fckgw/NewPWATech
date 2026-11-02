@@ -7,6 +7,8 @@ $empresaCupom = $stmtEmpCupom->fetch(PDO::FETCH_ASSOC) ?: [];
 $lojaNome     = $empresaCupom['nome_empresa'] ?? $loja['user_name'];
 $lojaTelefone = $empresaCupom['telefone_empresa'] ?? ($loja['user_telefone'] ?? '');
 $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empresaCupom['end_bairro_empresa'] ?? '') . ', ' . ($empresaCupom['cidade_empresa'] ?? ''));
+
+$formasPagamentoLojista = $formasPagamentoLojista ?? [];
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -33,7 +35,7 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
 
         .stat-card { background: var(--bg-card); border-radius: 20px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); }
 
-        /* KANBAN COM SCROLL VERTICAL INDEPENDENTE (NÃO QUEBRA A TELA) */
+        /* KANBAN COM SCROLL VERTICAL INDEPENDENTE */
         .kanban-col {
             background: rgba(27, 46, 75, 0.4);
             border-radius: 20px;
@@ -59,7 +61,6 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
             overflow-y: auto;
             padding-right: 5px;
         }
-        /* Scrollbar customizada moderna */
         .kanban-cards-wrapper::-webkit-scrollbar { width: 6px; }
         .kanban-cards-wrapper::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); border-radius: 10px; }
         .kanban-cards-wrapper::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
@@ -180,7 +181,7 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
                 </form>
             </div>
 
-            <!-- KANBAN DE 4 FASES COM ROLAGEM VERTICAL INTERNA -->
+            <!-- KANBAN DE 4 FASES -->
             <div class="row g-3">
 
                 <!-- 1. RECEBIDOS -->
@@ -272,7 +273,7 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
 </div>
 
 <!-- =================================================================== -->
-<!-- TELA DE APOIO / MODAL: HISTÓRICO COMPLETO DE PEDIDOS COM PDF & CUPOM -->
+<!-- TELA DE APOIO / MODAL: HISTÓRICO COMPLETO COM NOVO FILTRO DE PGTO -->
 <!-- =================================================================== -->
 <div class="modal fade no-print" id="modalHistoricoPedidos" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
@@ -280,7 +281,7 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
             <div class="modal-header border-secondary px-4 py-3">
                 <div>
                     <h5 class="fw-bold mb-0"><i class="fas fa-archive text-success me-2"></i>Histórico & Relatório Completo de Vendas</h5>
-                    <small class="text-secondary">Consulte pedidos antigos, reimprima cupons e gere relatórios em PDF.</small>
+                    <small class="text-secondary">Consulte pedidos antigos, filtre por pagamento, reimprima cupons e gere relatórios em PDF.</small>
                 </div>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-success rounded-pill btn-sm px-3 fw-bold" onclick="exportarRelatorioPDF()">
@@ -291,30 +292,43 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
             </div>
 
             <div class="modal-body p-4">
-                <!-- Filtros do Histórico -->
+                <!-- Filtros do Histórico: DATA INÍCIO, DATA FIM, STATUS E FORMA DE PAGAMENTO DINÂMICA -->
                 <div class="card bg-black bg-opacity-40 border-0 p-3 mb-4 rounded-4">
                     <div class="row g-2 align-items-center">
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="small text-secondary fw-bold">DE:</label>
                             <input type="date" id="hist_dt_ini" class="form-control bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3" value="<?= date('Y-m-01') ?>">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="small text-secondary fw-bold">ATÉ:</label>
                             <input type="date" id="hist_dt_fim" class="form-control bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3" value="<?= date('Y-m-d') ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="small text-secondary fw-bold">STATUS:</label>
                             <select id="hist_status" class="form-select bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3">
-                                <option value="">Todos</option>
+                                <option value="">Todos os Status</option>
                                 <option value="Finalizado">Apenas Finalizados</option>
                                 <option value="Aberto">Recebidos</option>
                                 <option value="Em Andamento">Em Andamento</option>
+                                <option value="Saiu para entrega">Saiu para Entrega</option>
                                 <option value="Cancelado">Cancelados</option>
                             </select>
                         </div>
-                        <div class="col-md-3 mt-auto">
+                        <!-- NOVO FILTRO DINÂMICO DE FORMA DE PAGAMENTO BASEADO EM ws_formas_pagamento -->
+                        <div class="col-md-3">
+                            <label class="small text-secondary fw-bold">FORMA DE PAGAMENTO:</label>
+                            <select id="hist_pgto" class="form-select bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3">
+                                <option value="">Todas as Formas de Pgto</option>
+                                <?php foreach ($formasPagamentoLojista as $fp): ?>
+                                    <option value="<?= htmlspecialchars($fp['f_pagamento']) ?>">
+                                        <?= htmlspecialchars($fp['f_pagamento']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2 mt-auto">
                             <button type="button" class="btn btn-success w-100 rounded-pill fw-bold" onclick="carregarHistoricoAjax()">
-                                <i class="fas fa-search me-1"></i> Consultar Período
+                                <i class="fas fa-search me-1"></i> Consultar
                             </button>
                         </div>
                     </div>
@@ -360,7 +374,7 @@ $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empr
                                 </tr>
                             </thead>
                             <tbody id="tabela-corpo-historico">
-                                <tr><td colspan="9" class="text-center py-4 text-secondary">Clique em "Consultar Período" para carregar os pedidos.</td></tr>
+                                <tr><td colspan="9" class="text-center py-4 text-secondary">Clique em "Consultar" para carregar os pedidos.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -636,7 +650,7 @@ function avancarFaseENotificar(pedidoId, novoStatus, telefone, cliente, codigo, 
 }
 
 // ===================================================================
-// ROTINAS DA TELA DE HISTÓRICO PASSADO, PDF E REIMPRESSÃO
+// ROTINAS DA TELA DE HISTÓRICO PASSADO (COM NOVO FILTRO DE PGTO)
 // ===================================================================
 function abrirTelaHistorico() {
     new bootstrap.Modal(document.getElementById('modalHistoricoPedidos')).show();
@@ -644,11 +658,12 @@ function abrirTelaHistorico() {
 }
 
 function carregarHistoricoAjax() {
-    const dtIni = document.getElementById('hist_dt_ini').value;
-    const dtFim = document.getElementById('hist_dt_fim').value;
+    const dtIni  = document.getElementById('hist_dt_ini').value;
+    const dtFim  = document.getElementById('hist_dt_fim').value;
     const status = document.getElementById('hist_status').value;
+    const pgto   = document.getElementById('hist_pgto').value; // Captura do filtro de pgto
 
-    const url = window.location.pathname + `?ajax_historico=1&dt_ini=${dtIni}&dt_fim=${dtFim}&status_hist=${encodeURIComponent(status)}`;
+    const url = window.location.pathname + `?ajax_historico=1&dt_ini=${dtIni}&dt_fim=${dtFim}&status_hist=${encodeURIComponent(status)}&pgto_hist=${encodeURIComponent(pgto)}`;
 
     fetch(url)
     .then(r => r.json())
@@ -667,7 +682,7 @@ function renderTabelaHistorico(pedidos) {
     let qtd = pedidos.length;
 
     if (pedidos.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-secondary">Nenhum pedido encontrado para o período selecionado.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-secondary">Nenhum pedido encontrado para o período e filtros selecionados.</td></tr>`;
         document.getElementById('hist-total-faturado').innerText = 'R$ 0,00';
         document.getElementById('hist-total-qtd').innerText = '0 pedidos';
         document.getElementById('hist-ticket-medio').innerText = 'R$ 0,00';
@@ -687,7 +702,7 @@ function renderTabelaHistorico(pedidos) {
             <td><b>${p.nome}</b></td>
             <td>${p.telefone}</td>
             <td>${p.bairro || 'Balcão'}</td>
-            <td>${p.forma_pagamento}</td>
+            <td><span class="badge bg-secondary bg-opacity-50">${p.forma_pagamento}</span></td>
             <td class="text-success fw-bold">R$ ${valTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
             <td><span class="badge bg-secondary">${p.status}</span></td>
             <td class="text-end">
@@ -714,12 +729,13 @@ function imprimirCupomHistorico(p) {
     imprimirCupomAtual();
 }
 
-// GERA O RELATÓRIO FORMATADO EM PDF (JANELA DE IMPRESSÃO / SALVAR COMO PDF)
+// GERA O RELATÓRIO FORMATADO EM PDF COM FORMA DE PGTO INCLUSA
 function exportarRelatorioPDF() {
-    const dtIni = document.getElementById('hist_dt_ini').value;
-    const dtFim = document.getElementById('hist_dt_fim').value;
-    const fat = document.getElementById('hist-total-faturado').innerText;
-    const qtd = document.getElementById('hist-total-qtd').innerText;
+    const dtIni  = document.getElementById('hist_dt_ini').value;
+    const dtFim  = document.getElementById('hist_dt_fim').value;
+    const pgFilt = document.getElementById('hist_pgto').value || 'Todas';
+    const fat    = document.getElementById('hist-total-faturado').innerText;
+    const qtd    = document.getElementById('hist-total-qtd').innerText;
     const ticket = document.getElementById('hist-ticket-medio').innerText;
 
     let linhas = "";
@@ -740,12 +756,12 @@ function exportarRelatorioPDF() {
     <style>body{font-family:sans-serif; padding:20px; color:#333;} table{width:100%; border-collapse:collapse; margin-top:20px;} th{background:#f4f4f4; border:1px solid #ddd; padding:8px; text-align:left;} .resumo{margin-top:15px; padding:15px; background:#f9f9f9; border-radius:8px;}</style>
     </head><body>
     <h2>Relatório Gerencial de Vendas - <?= addslashes($lojaNome) ?></h2>
-    <p>Período: ${dtIni} até ${dtFim}</p>
+    <p><b>Período:</b> ${dtIni} até ${dtFim} | <b>Forma de Pgto:</b> ${pgFilt}</p>
     <div class="resumo">
         <b>Total Faturado:</b> ${fat} | <b>Total de Pedidos:</b> ${qtd} | <b>Ticket Médio:</b> ${ticket}
     </div>
     <table>
-        <thead><tr><th>Pedido</th><th>Data/Hora</th><th>Cliente</th><th>Bairro</th><th>Pagamento</th><th>Total</th><th>Status</th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Data/Hora</th><th>Cliente</th><th>Bairro</th><th>Forma Pagamento</th><th>Total</th><th>Status</th></tr></thead>
         <tbody>${linhas}</tbody>
     </table>
     <script>window.onload = function(){ window.print(); window.close(); }<\/script>

@@ -46,7 +46,10 @@ class LojistaController {
     /**
      * Dashboard Principal com Kanban de Pedidos & Faturamento
      */
-     public function dashboard(array $loja): void {
+     /**
+     * Dashboard Principal com Kanban Otimizado & Histórico
+     */
+    public function dashboard(array $loja): void {
         $userId = (int)$loja['user_id'];
         $db = $this->db;
 
@@ -73,12 +76,13 @@ class LojistaController {
             exit;
         }
 
-        // Endpoint AJAX para buscar histórico passado com filtros
+        // Endpoint AJAX para buscar histórico com filtros (Data, Status e Forma de Pagamento)
         if (isset($_GET['ajax_historico'])) {
             header('Content-Type: application/json');
-            $dtIni = !empty($_GET['dt_ini']) ? $_GET['dt_ini'] . ' 00:00:00' : date('Y-m-01 00:00:00');
-            $dtFim = !empty($_GET['dt_fim']) ? $_GET['dt_fim'] . ' 23:59:59' : date('Y-m-d 23:59:59');
+            $dtIni    = !empty($_GET['dt_ini']) ? $_GET['dt_ini'] . ' 00:00:00' : date('Y-m-01 00:00:00');
+            $dtFim    = !empty($_GET['dt_fim']) ? $_GET['dt_fim'] . ' 23:59:59' : date('Y-m-d 23:59:59');
             $stFiltro = trim($_GET['status_hist'] ?? '');
+            $pgFiltro = trim($_GET['pgto_hist'] ?? '');
 
             $sqlH = "SELECT * FROM ws_pedidos WHERE user_id = ? AND data BETWEEN ? AND ?";
             $paramsH = [$userId, $dtIni, $dtFim];
@@ -86,6 +90,12 @@ class LojistaController {
             if (!empty($stFiltro)) {
                 $sqlH .= " AND LOWER(status) = LOWER(?)";
                 $paramsH[] = $stFiltro;
+            }
+
+            // NOVO FILTRO: Forma de Pagamento
+            if (!empty($pgFiltro)) {
+                $sqlH .= " AND LOWER(forma_pagamento) = LOWER(?)";
+                $paramsH[] = $pgFiltro;
             }
 
             $sqlH .= " ORDER BY data DESC LIMIT 500";
@@ -97,7 +107,12 @@ class LojistaController {
             exit;
         }
 
-        // Filtros da Tela Principal (Data Início, Data Fim, Busca e Status)
+        // Busca formas de pagamento cadastradas pelo lojista (ws_formas_pagamento)
+        $stmtFormasPgto = $db->prepare("SELECT id_f_pagamento, f_pagamento FROM ws_formas_pagamento WHERE user_id = ? ORDER BY f_pagamento ASC");
+        $stmtFormasPgto->execute([$userId]);
+        $formasPagamentoLojista = $stmtFormasPgto->fetchAll(PDO::FETCH_ASSOC);
+
+        // Filtros da Tela Principal
         $filtroStatus = trim($_GET['status'] ?? '');
         $dataInicio   = trim($_GET['data_inicio'] ?? '');
         $dataFim      = trim($_GET['data_fim'] ?? '');
@@ -153,7 +168,6 @@ class LojistaController {
             } elseif ($st === 'saiu para entrega' || $st === 'em rota') {
                 $faseEntrega[] = $p;
             } else {
-                // REGRA: Finalizados na tela principal exibe APENAS os do dia atual
                 if ($dataPed === $hoje || !empty($dataInicio)) {
                     $faseFinalizado[] = $p;
                 }
