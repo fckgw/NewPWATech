@@ -111,6 +111,8 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=taxas"><i class="fas fa-motorcycle me-2"></i> Taxas / Bairros</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=horarios"><i class="fas fa-clock me-2"></i> Horários</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=clientes"><i class="fas fa-users me-2"></i> Meus Clientes (CRM)</a>
+                    <!-- NOVO MENU EQUIPE / USUÁRIOS -->
+                    <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=usuarios"><i class="fas fa-user-shield me-2"></i> Equipe / Usuários</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=configuracoes"><i class="fas fa-cog me-2"></i> Configurações</a>
                 </nav>
             </div>
@@ -249,7 +251,6 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
                             <span class="badge bg-success rounded-pill"><?= count($faseFinalizado) ?></span>
                         </div>
                         
-                        <!-- BOTÃO QUE ABRE A TELA DE HISTÓRICO PASSADO -->
                         <button type="button" class="btn btn-outline-light btn-sm w-100 rounded-pill mb-2 fw-bold" onclick="abrirTelaHistorico()">
                             <i class="fas fa-history me-1"></i> Histórico Completo / PDF
                         </button>
@@ -272,9 +273,7 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
     </div>
 </div>
 
-<!-- =================================================================== -->
-<!-- TELA DE APOIO / MODAL: HISTÓRICO COMPLETO COM NOVO FILTRO DE PGTO -->
-<!-- =================================================================== -->
+<!-- MODAL HISTÓRICO COMPLETO -->
 <div class="modal fade no-print" id="modalHistoricoPedidos" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content bg-dark text-white">
@@ -292,7 +291,6 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
             </div>
 
             <div class="modal-body p-4">
-                <!-- Filtros do Histórico: DATA INÍCIO, DATA FIM, STATUS E FORMA DE PAGAMENTO DINÂMICA -->
                 <div class="card bg-black bg-opacity-40 border-0 p-3 mb-4 rounded-4">
                     <div class="row g-2 align-items-center">
                         <div class="col-md-2">
@@ -314,7 +312,6 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
                                 <option value="Cancelado">Cancelados</option>
                             </select>
                         </div>
-                        <!-- NOVO FILTRO DINÂMICO DE FORMA DE PAGAMENTO BASEADO EM ws_formas_pagamento -->
                         <div class="col-md-3">
                             <label class="small text-secondary fw-bold">FORMA DE PAGAMENTO:</label>
                             <select id="hist_pgto" class="form-select bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3">
@@ -334,7 +331,6 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
                     </div>
                 </div>
 
-                <!-- Resumo dos Valores do Período -->
                 <div class="row g-3 mb-4" id="cards-resumo-historico">
                     <div class="col-md-4">
                         <div class="stat-card">
@@ -356,7 +352,6 @@ $formasPagamentoLojista = $formasPagamentoLojista ?? [];
                     </div>
                 </div>
 
-                <!-- Tabela Completa do Histórico -->
                 <div class="card card-custom p-3 shadow" id="area-tabela-historico">
                     <div class="table-responsive">
                         <table class="table table-dark table-hover mb-0 align-middle">
@@ -649,9 +644,6 @@ function avancarFaseENotificar(pedidoId, novoStatus, telefone, cliente, codigo, 
     });
 }
 
-// ===================================================================
-// ROTINAS DA TELA DE HISTÓRICO PASSADO (COM NOVO FILTRO DE PGTO)
-// ===================================================================
 function abrirTelaHistorico() {
     new bootstrap.Modal(document.getElementById('modalHistoricoPedidos')).show();
     carregarHistoricoAjax();
@@ -661,7 +653,7 @@ function carregarHistoricoAjax() {
     const dtIni  = document.getElementById('hist_dt_ini').value;
     const dtFim  = document.getElementById('hist_dt_fim').value;
     const status = document.getElementById('hist_status').value;
-    const pgto   = document.getElementById('hist_pgto').value; // Captura do filtro de pgto
+    const pgto   = document.getElementById('hist_pgto').value;
 
     const url = window.location.pathname + `?ajax_historico=1&dt_ini=${dtIni}&dt_fim=${dtFim}&status_hist=${encodeURIComponent(status)}&pgto_hist=${encodeURIComponent(pgto)}`;
 
@@ -729,7 +721,6 @@ function imprimirCupomHistorico(p) {
     imprimirCupomAtual();
 }
 
-// GERA O RELATÓRIO FORMATADO EM PDF COM FORMA DE PGTO INCLUSA
 function exportarRelatorioPDF() {
     const dtIni  = document.getElementById('hist_dt_ini').value;
     const dtFim  = document.getElementById('hist_dt_fim').value;

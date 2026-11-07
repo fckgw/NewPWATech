@@ -30,10 +30,8 @@ if (!file_exists($authFile)) {
 }
 require_once $authFile;
 
-// Detecção dinâmica de pastas (evita divergência de maiúsculas/minúsculas no Linux)
 $pastaLogista = is_dir(__DIR__ . '/views/admin_logista') ? 'admin_logista' : 'admin_lojista';
 
-// Extração segura de parâmetros da URL e URI
 $tenantSlug = $_GET['tenant'] ?? '';
 $pagina     = $_GET['pagina'] ?? 'home';
 $uriPath    = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
@@ -60,7 +58,6 @@ if (empty($tenantSlug)) {
 if ($tenantSlug === 'master-admin') {
     $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
-    // Processamento do Formulário de Login Master
     if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email'] ?? '');
         $senha = trim($_POST['senha'] ?? '');
@@ -77,8 +74,6 @@ if ($tenantSlug === 'master-admin') {
             $admin = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($admin && Auth::verificarSenha($senha, $admin['admin_senha'])) {
-                
-                // Migração transparente de MD5 (32 chars) para SHA-256 no banco
                 if (strlen(trim($admin['admin_senha'])) === 32) {
                     $up = $db->prepare("UPDATE ws_admin SET admin_senha = ? WHERE admin_id = ?");
                     $up->execute([Auth::hashSenha($senha), $admin['admin_id']]);
@@ -97,20 +92,17 @@ if ($tenantSlug === 'master-admin') {
         }
     }
 
-    // Logout Master
     if ($acao === 'logout') {
         Auth::logout();
         header("Location: /master-admin");
         exit;
     }
 
-    // Controle de Acesso
     if (!Auth::isMasterLoggedIn()) {
         include __DIR__ . '/views/admin_master/login.php';
         exit;
     }
 
-    // Telas do Painel Logado
     if (file_exists(__DIR__ . '/views/admin_master/gerenciar_lojas.php')) {
         include __DIR__ . '/views/admin_master/gerenciar_lojas.php';
     } elseif (file_exists(__DIR__ . '/views/admin_master/dashboard.php')) {
@@ -126,13 +118,58 @@ if ($tenantSlug === 'master-admin') {
 }
 
 // ==========================================================
-// ROTA 3: LOGIN CENTRALIZADO DO LOJISTA (Tabela ws_users)
+// ROTA 3: LOGIN DO LOJISTA & RECUPERAÇÃO DE SENHA (ws_users)
 // URL: /admin-lojista
 // ==========================================================
 if ($tenantSlug === 'admin-lojista') {
     $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
-    // Processamento do Formulário de Login do Lojista
+    // 3.1: RECUPERAÇÃO DE SENHA VIA AJAX
+    if ($acao === 'recuperar_senha' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (ob_get_length()) ob_clean();
+        header('Content-Type: application/json; charset=utf-8');
+
+        $emailRecup = trim($_POST['email'] ?? '');
+
+        if (empty($emailRecup)) {
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Informe o seu e-mail cadastrado!']);
+            exit;
+        }
+
+        try {
+            $db = Conexao::getConexao();
+            $stmt = $db->prepare("SELECT user_id, user_name, user_email FROM ws_users WHERE TRIM(LOWER(user_email)) = TRIM(LOWER(?)) LIMIT 1");
+            $stmt->execute([$emailRecup]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user) {
+                echo json_encode(['sucesso' => false, 'mensagem' => 'Nenhum usuário encontrado com este e-mail.']);
+                exit;
+            }
+
+            // Gera senha temporária simples de 6 caracteres alfanuméricos
+            $caracteres = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+            $senhaTemp = substr(str_shuffle($caracteres), 0, 6);
+            $novoHash = Auth::hashSenha($senhaTemp);
+
+            $up = $db->prepare("UPDATE ws_users SET user_password = ? WHERE user_id = ?");
+            $up->execute([$novoHash, $user['user_id']]);
+
+            echo json_encode([
+                'sucesso'    => true,
+                'nome'       => $user['user_name'],
+                'senha_temp' => $senhaTemp,
+                'mensagem'   => 'Senha temporária gerada com sucesso!'
+            ]);
+            exit;
+
+        } catch (Exception $e) {
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Erro ao processar: ' . $e->getMessage()]);
+            exit;
+        }
+    }
+
+    // 3.2: AUTENTICAÇÃO DO LOJISTA
     if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email'] ?? '');
         $senha = trim($_POST['senha'] ?? '');
@@ -150,13 +187,11 @@ if ($tenantSlug === 'admin-lojista') {
 
             if ($lojista && Auth::verificarSenha($senha, $lojista['user_password'])) {
 
-                // Bloqueia se inativo
                 if (!empty($lojista['user_status']) && strtolower(trim($lojista['user_status'])) !== 'ativo') {
                     header("Location: /admin-lojista?erro=inativo");
                     exit;
                 }
 
-                // Migração transparente de MD5 para SHA-256
                 if (strlen(trim($lojista['user_password'])) === 32) {
                     $up = $db->prepare("UPDATE ws_users SET user_password = ? WHERE user_id = ?");
                     $up->execute([Auth::hashSenha($senha), $lojista['user_id']]);
@@ -165,7 +200,6 @@ if ($tenantSlug === 'admin-lojista') {
                 Auth::loginLojista($lojista);
                 session_write_close();
 
-                // Redireciona diretamente para o painel exclusivo daquela loja
                 $slug = trim($lojista['user_virtual_env']);
                 header("Location: /" . $slug . "/admin");
                 exit;
@@ -190,11 +224,12 @@ if ($tenantSlug === 'admin-lojista') {
 // ==========================================================
 try {
     $db = Conexao::getConexao();
-    $stmt = $db->prepare("SELECT * FROM ws_users WHERE TRIM(LOWER(user_virtual_env)) = TRIM(LOWER(?)) LIMIT 1");
+
+    // Busca o registro principal da loja (user_id menor / proprietário)
+    $stmt = $db->prepare("SELECT * FROM ws_users WHERE TRIM(LOWER(user_virtual_env)) = TRIM(LOWER(?)) ORDER BY user_id ASC LIMIT 1");
     $stmt->execute([$tenantSlug]);
     $loja = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // Se o slug não existir em ws_users
     if (!$loja) {
         header("Location: /?erro=loja_nao_encontrada");
         exit;
@@ -277,22 +312,30 @@ try {
     if ($isAdminRoute) {
         $acao = $_POST['acao'] ?? ($_GET['acao'] ?? '');
 
-        // Logout exclusivo do lojista
         if ($acao === 'logout') {
             Auth::logout();
             header("Location: /admin-lojista");
             exit;
         }
 
-        // Submissão do login direto do tenant (caso tente logar via /{slug}/admin)
+        // Submissão do login direto do tenant (busca por e-mail no ws_users)
         if ($acao === 'autenticar' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $email = trim($_POST['email'] ?? '');
             $senha = trim($_POST['senha'] ?? '');
 
-            if (strtolower($email) === strtolower(trim($loja['user_email'])) && Auth::verificarSenha($senha, $loja['user_password'])) {
-                Auth::loginLojista($loja);
+            $stmtUsuario = $db->prepare("SELECT * FROM ws_users WHERE TRIM(LOWER(user_email)) = TRIM(LOWER(?)) LIMIT 1");
+            $stmtUsuario->execute([$email]);
+            $usuarioEncontrado = $stmtUsuario->fetch(PDO::FETCH_ASSOC);
+
+            if ($usuarioEncontrado && Auth::verificarSenha($senha, $usuarioEncontrado['user_password'])) {
+                if (!empty($usuarioEncontrado['user_status']) && strtolower(trim($usuarioEncontrado['user_status'])) !== 'ativo') {
+                    header("Location: /{$tenantSlug}/admin?erro=inativo");
+                    exit;
+                }
+
+                Auth::loginLojista($usuarioEncontrado);
                 session_write_close();
-                header("Location: /{$tenantSlug}/admin");
+                header("Location: /" . trim($usuarioEncontrado['user_virtual_env']) . "/admin");
                 exit;
             } else {
                 header("Location: /{$tenantSlug}/admin?erro=credenciais_invalidas");
@@ -300,8 +343,8 @@ try {
             }
         }
 
-        // Bloqueia e exibe a tela de login se não estiver logado para este tenant
-        if (!Auth::isLojistaLoggedIn((int)$loja['user_id'])) {
+        // VALIDAÇÃO CORRIGIDA: Checa se o usuário logado pertence à loja ($tenantSlug)
+        if (!Auth::isLojistaLoggedIn($tenantSlug)) {
             include __DIR__ . "/views/{$pastaLogista}/login.php";
             exit;
         }
@@ -310,10 +353,7 @@ try {
         require_once __DIR__ . '/app/controllers/LojistaController.php';
         $lojistaCtrl = new LojistaController();
 
-        // Extração robusta da sub-seção:
-        // Suporta tanto Query String (?secao=produtos) quanto URLs amigáveis (/admin/produtos)
         $subSecao = $_GET['secao'] ?? ($_GET['p'] ?? '');
-
         if (empty($subSecao)) {
             $partesUri = explode('/', trim($uriPath, '/'));
             $posAdmin = array_search('admin', $partesUri);
@@ -326,7 +366,6 @@ try {
             $subSecao = 'dashboard';
         }
 
-        // Mapeamento completo de todas as seções administrativas
         switch ($subSecao) {
             case 'produtos':
                 $lojistaCtrl->produtos($loja);
@@ -345,6 +384,9 @@ try {
                 break;
             case 'clientes':
                 $lojistaCtrl->clientes($loja);
+                break;
+            case 'usuarios':
+                $lojistaCtrl->usuarios($loja);
                 break;
             case 'dashboard':
             default:

@@ -16,17 +16,25 @@ class Auth {
         $hashBanco = trim($hashBanco);
         $senhaDigitada = trim($senhaDigitada);
 
-        // 1. SHA-256 (64 caracteres)
+        // 1. SHA-256 Exato
         if (hash_equals(self::hashSenha($senhaDigitada), $hashBanco)) {
             return true;
         }
 
-        // 2. MD5 Legado (32 caracteres)
+        // 2. SHA-256 Tolerante para Senhas Temporárias (Maiúsculas / Minúsculas)
+        if (hash_equals(self::hashSenha(strtoupper($senhaDigitada)), $hashBanco)) {
+            return true;
+        }
+        if (hash_equals(self::hashSenha(strtolower($senhaDigitada)), $hashBanco)) {
+            return true;
+        }
+
+        // 3. MD5 Legado (32 caracteres)
         if (strlen($hashBanco) === 32 && md5($senhaDigitada) === $hashBanco) {
             return true;
         }
 
-        // 3. Texto puro
+        // 4. Texto puro
         if ($senhaDigitada === $hashBanco) {
             return true;
         }
@@ -34,9 +42,6 @@ class Auth {
         return false;
     }
 
-    // ==========================================
-    // AUTENTICAÇÃO MASTER (ws_admin)
-    // ==========================================
     public static function isMasterLoggedIn(): bool {
         self::startSession();
         return !empty($_SESSION['master_logged']) && $_SESSION['master_logged'] === true;
@@ -45,22 +50,23 @@ class Auth {
     public static function loginMaster(array $dados): void {
         self::startSession();
         $_SESSION['master_logged'] = true;
-        // Pega id independente do nome da coluna (admin_id ou id)
         $_SESSION['master_id']     = (int)($dados['admin_id'] ?? ($dados['id'] ?? 1));
         $_SESSION['master_nome']   = $dados['admin_nome'] ?? ($dados['nome'] ?? 'Super Admin');
         $_SESSION['master_email']  = $dados['admin_email'] ?? ($dados['email'] ?? '');
     }
 
-    // ==========================================
-    // AUTENTICAÇÃO LOJISTA (ws_users)
-    // ==========================================
-    public static function isLojistaLoggedIn(int $userId = 0): bool {
+    /**
+     * Valida se o Lojista está logado e pertence à loja atual (slug)
+     */
+    public static function isLojistaLoggedIn(string $slug = ''): bool {
         self::startSession();
         if (empty($_SESSION['lojista_logged']) || $_SESSION['lojista_logged'] !== true) {
             return false;
         }
-        if ($userId > 0) {
-            return (int)($_SESSION['lojista_id'] ?? 0) === (int)$userId;
+        if (!empty($slug)) {
+            $sessaoSlug = strtolower(trim($_SESSION['lojista_slug'] ?? ''));
+            $atualSlug  = strtolower(trim($slug));
+            return ($sessaoSlug === $atualSlug);
         }
         return true;
     }
@@ -73,6 +79,11 @@ class Auth {
         $_SESSION['lojista_slug']      = trim($user['user_virtual_env']);
         $_SESSION['lojista_email']     = $user['user_email'];
         $_SESSION['current_tenant_id'] = (int)$user['user_id'];
+    }
+
+    public static function isClienteLoggedIn(): bool {
+        self::startSession();
+        return !empty($_SESSION['Cliente_ID']);
     }
 
     public static function logout(): void {

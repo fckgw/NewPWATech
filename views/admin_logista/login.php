@@ -2,7 +2,6 @@
 $erro = $_GET['erro'] ?? ($_SESSION['login_erro'] ?? null);
 unset($_SESSION['login_erro']);
 
-// Determina se estamos dentro do tenant específico ou no login geral
 $tenantSlug = $tenantSlug ?? ($_GET['tenant'] ?? '');
 if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
     $formAction = "/" . htmlspecialchars($tenantSlug) . "/admin";
@@ -20,6 +19,7 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         :root {
@@ -126,14 +126,9 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
             <div class="alert alert-warning border-0 rounded-4 py-2 px-3 small text-center mb-4">
                 <i class="fas fa-info-circle me-1"></i> Preencha todos os campos.
             </div>
-        <?php elseif ($erro === 'erro_banco'): ?>
-            <div class="alert alert-danger border-0 rounded-4 py-2 px-3 small text-center mb-4">
-                <i class="fas fa-database me-1"></i> Falha de comunicação com o banco de dados.
-            </div>
         <?php endif; ?>
 
         <form action="<?= $formAction ?>" method="POST">
-            <!-- Campo oculto para garantir a leitura da ação mesmo sem query string -->
             <input type="hidden" name="acao" value="autenticar">
 
             <div class="mb-3">
@@ -142,11 +137,11 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
                     <span class="input-group-text bg-transparent border-0 position-absolute" style="z-index: 10; left: 6px; top: 12px; color: #888ea8;">
                         <i class="fas fa-envelope"></i>
                     </span>
-                    <input type="email" name="email" class="form-control ps-5" placeholder="seu-email@dominio.com" required value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" />
+                    <input type="email" name="email" id="login_email" class="form-control ps-5" placeholder="seu-email@dominio.com" required value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" />
                 </div>
             </div>
 
-            <div class="mb-4">
+            <div class="mb-2">
                 <label class="small fw-bold text-secondary mb-1 ms-1">SENHA DE ACESSO</label>
                 <div class="input-group">
                     <span class="input-group-text bg-transparent border-0 position-absolute" style="z-index: 10; left: 6px; top: 12px; color: #888ea8;">
@@ -157,6 +152,12 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
                         <i class="fas fa-eye" id="eyeLojista"></i>
                     </button>
                 </div>
+            </div>
+
+            <div class="text-end mb-4">
+                <a href="javascript:void(0)" onclick="abrirModalEsqueceuSenha()" class="text-success small fw-bold text-decoration-none">
+                    Esqueceu a senha?
+                </a>
             </div>
 
             <button type="submit" class="btn btn-lojista w-100 mb-3">
@@ -171,7 +172,35 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
         </form>
     </div>
 
+    <!-- MODAL ESQUECEU A SENHA -->
+    <div class="modal fade" id="modalEsqueceuSenha" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark border-0 rounded-4 text-white p-4 shadow-lg">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="fw-bold mb-0"><i class="fas fa-key text-success me-2"></i>Recuperar Acesso</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <p class="text-secondary small mb-4">Informe o e-mail cadastrado na sua conta para gerarmos uma senha temporária imediata.</p>
+
+                <form id="formRecuperarSenha" onsubmit="solicitarSenhaTemp(event)">
+                    <div class="mb-4">
+                        <label class="small fw-bold text-secondary mb-1">E-MAIL CADASTRADO</label>
+                        <input type="email" id="recup_email" class="form-control" placeholder="seu-email@dominio.com" required>
+                    </div>
+
+                    <button type="submit" id="btnGerarTemp" class="btn btn-success w-100 rounded-pill fw-bold py-3 shadow">
+                        <i class="fas fa-bolt me-1"></i> Gerar Senha Temporária
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
+        let modalRecupInst = null;
+
         function toggleLojistaPass() {
             const input = document.getElementById('passLojista');
             const icon = document.getElementById('eyeLojista');
@@ -182,6 +211,88 @@ if (!empty($tenantSlug) && $tenantSlug !== 'admin-lojista') {
                 input.type = 'password';
                 icon.classList.replace('fa-eye-slash', 'fa-eye');
             }
+        }
+
+        function abrirModalEsqueceuSenha() {
+            document.getElementById('recup_email').value = document.getElementById('login_email').value || '';
+            modalRecupInst = new bootstrap.Modal(document.getElementById('modalEsqueceuSenha'));
+            modalRecupInst.show();
+        }
+
+        function solicitarSenhaTemp(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btnGerarTemp');
+            const email = document.getElementById('recup_email').value.trim();
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Gerando...';
+
+            const formData = new FormData();
+            formData.append('acao', 'recuperar_senha');
+            formData.append('email', email);
+
+            fetch('/admin-lojista', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            })
+            .then(r => r.json())
+            .then(res => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-bolt me-1"></i> Gerar Senha Temporária';
+
+                if (res.sucesso) {
+                    modalRecupInst.hide();
+
+                    // Preenche imediatamente os campos e mostra a senha em texto claro com o olho aberto
+                    document.getElementById('login_email').value = email;
+                    document.getElementById('passLojista').value = res.senha_temp;
+                    document.getElementById('passLojista').type = 'text';
+                    document.getElementById('eyeLojista').classList.replace('fa-eye', 'fa-eye-slash');
+
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Senha Temporária Gerada!',
+                        html: `<p class="mb-2">Olá, <b>${res.nome}</b>. Sua nova senha de acesso provisória é:</p>
+                               <div class="bg-dark p-3 rounded-3 mb-3 text-success fw-bold fs-3 border border-success border-opacity-25" id="boxSenhaTemp" style="letter-spacing: 3px;">
+                                   ${res.senha_temp}
+                               </div>
+                               <small class="text-secondary">O formulário já foi preenchido. Basta clicar em <b>Entrar no Painel</b>.</small>`,
+                        background: '#1b2e4b',
+                        color: '#fff',
+                        showCancelButton: true,
+                        confirmButtonColor: '#34af23',
+                        cancelButtonColor: '#6b7280',
+                        confirmButtonText: '<i class="fas fa-copy me-1"></i> Copiar Senha',
+                        cancelButtonText: 'Fechar'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            navigator.clipboard.writeText(res.senha_temp);
+                        }
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Atenção',
+                        text: res.mensagem || 'Falha ao recuperar senha.',
+                        background: '#1b2e4b',
+                        color: '#fff',
+                        confirmButtonColor: '#ef4444'
+                    });
+                }
+            })
+            .catch(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-bolt me-1"></i> Gerar Senha Temporária';
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Falha de Conexão',
+                    text: 'Não foi possível se comunicar com o servidor.',
+                    background: '#1b2e4b',
+                    color: '#fff',
+                    confirmButtonColor: '#ef4444'
+                });
+            });
         }
     </script>
 </body>

@@ -571,4 +571,147 @@ class LojistaController {
         $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
         require_once __DIR__ . "/../../views/{$pastaLogista}/clientes.php";
     }
+
+
+    /**
+     * Gestão de Usuários da Equipe da Loja (ws_users)
+     * Limite: Até 3 usuários por lanchonete (o titular + 2 adicionais)
+     */
+    public function usuarios(array $loja): void {
+        $slug = trim($loja['user_virtual_env']);
+        $db = $this->db;
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $acao = $_POST['acao'] ?? '';
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+            try {
+                if ($acao === 'salvar') {
+                    $nome        = trim($_POST['user_name'] ?? '');
+                    $cpf         = trim($_POST['user_cpf'] ?? '');
+                    $telefone    = trim($_POST['user_telefone'] ?? '');
+                    $email       = trim($_POST['user_email'] ?? '');
+                    $senha       = trim($_POST['user_password'] ?? '');
+                    $confirma    = trim($_POST['user_password_confirm'] ?? '');
+                    $nivel       = (int)($_POST['user_level'] ?? 1); // 1 = Comum, 2 = Motoboy, 3 = Admin
+                    $id          = (int)($_POST['user_id'] ?? 0);
+
+                    if (empty($nome) || empty($email)) {
+                        throw new Exception("Nome e E-mail são obrigatórios!");
+                    }
+
+                    if ($id > 0) {
+                        // EDIÇÃO DE USUÁRIO
+                        $chkEmail = $db->prepare("SELECT user_id FROM ws_users WHERE LOWER(user_email) = LOWER(?) AND user_id != ?");
+                        $chkEmail->execute([$email, $id]);
+                        if ($chkEmail->rowCount() > 0) {
+                            throw new Exception("Este e-mail já está em uso por outro usuário!");
+                        }
+
+                        $senhaSql = "";
+                        $params = [$nome, $cpf, $telefone, $email, $nivel];
+
+                        if (!empty($senha)) {
+                            if ($senha !== $confirma) {
+                                throw new Exception("A senha e a confirmação de senha não coincidem!");
+                            }
+                            $senhaSql = ", user_password = ?";
+                            $params[] = Auth::hashSenha($senha);
+                        }
+
+                        $params[] = $id;
+                        $params[] = $slug;
+
+                        $sql = "UPDATE ws_users SET user_name = ?, user_cpf = ?, user_telefone = ?, user_email = ?, user_level = ? {$senhaSql} WHERE user_id = ? AND user_virtual_env = ?";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute($params);
+                        $msg = "Usuário \"{$nome}\" atualizado com sucesso!";
+                    } else {
+                        // CADASTRO NOVO: Checa limite de 3 usuários
+                        $stmtContagem = $db->prepare("SELECT COUNT(*) FROM ws_users WHERE user_virtual_env = ?");
+                        $stmtContagem->execute([$slug]);
+                        $totalUsuariosLoja = (int)$stmtContagem->fetchColumn();
+
+                        if ($totalUsuariosLoja >= 3) {
+                            throw new Exception("Limite atingido! Sua loja já possui {$totalUsuariosLoja} usuários cadastrados (limite de 3).");
+                        }
+
+                        // Valida se o e-mail já existe
+                        $chkEmail = $db->prepare("SELECT user_id FROM ws_users WHERE LOWER(user_email) = LOWER(?)");
+                        $chkEmail->execute([$email]);
+                        if ($chkEmail->rowCount() > 0) {
+                            throw new Exception("Este e-mail já está cadastrado no sistema!");
+                        }
+
+                        if (empty($senha)) {
+                            throw new Exception("A senha é obrigatória para novos cadastros!");
+                        }
+
+                        if ($senha !== $confirma) {
+                            throw new Exception("A senha e a confirmação de senha não coincidem!");
+                        }
+
+                        $senhaHash = Auth::hashSenha($senha);
+
+                        // Grava herdando o plano e com user_status = 'ativo' para garantir login
+                        $sql = "INSERT INTO ws_users (
+                                    user_name, user_lastname, user_virtual_env, user_email, user_cpf,
+                                    user_telefone, user_img_perfil, user_password, user_level, user_plano,
+                                    user_status, user_cont, user_nome_plano, user_dias_plano, status_assinatura_plano,
+                                    codigo_assinante, user_data_renova
+                                ) VALUES (
+                                    ?, '', ?, ?, ?,
+                                    ?, '', ?, ?, 1,
+                                    'ativo', 0, '', 0, '',
+                                    '', '2029-12-31'
+                                )";
+
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([$nome, $slug, $email, $cpf, $telefone, $senhaHash, $nivel]);
+                        $msg = "Usuário \"{$nome}\" cadastrado com sucesso! Já pode realizar login.";
+                    }
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => $msg]);
+                        exit;
+                    }
+                }
+
+                if ($acao === 'excluir') {
+                    $id = (int)$_POST['id'];
+
+                    if ($id === (int)$loja['user_id']) {
+                        throw new Exception("Você não pode excluir o usuário proprietário da loja!");
+                    }
+
+                    $del = $db->prepare("DELETE FROM ws_users WHERE user_id = ? AND user_virtual_env = ?");
+                    $del->execute([$id, $slug]);
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => "Usuário removido da equipe com sucesso!"]);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
+            }
+
+            header("Location: /" . $loja['user_virtual_env'] . "/admin?secao=usuarios");
+            exit;
+        }
+
+        // Listagem de usuários
+        $stmtUsers = $db->prepare("SELECT user_id, user_name, user_cpf, user_telefone, user_email, user_level, user_status, user_registration, user_ultimoacesso FROM ws_users WHERE user_virtual_env = ? ORDER BY user_id ASC");
+        $stmtUsers->execute([$slug]);
+        $usuarios = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
+
+        $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
+        require_once __DIR__ . "/../../views/{$pastaLogista}/usuarios.php";
+    }
 }
