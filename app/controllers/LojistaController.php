@@ -49,11 +49,201 @@ class LojistaController {
      /**
      * Dashboard Principal com Kanban Otimizado & Histórico
      */
+    /**
+     * Dashboard Principal com Kanban, Caixa Diário & Histórico
+     */
     public function dashboard(array $loja): void {
         $userId = (int)$loja['user_id'];
         $db = $this->db;
 
-        // Ações de alteração de status do Pedido via POST
+        $sessaoUserId   = (int)($_SESSION['lojista_id'] ?? $userId);
+        $sessaoUserNome = trim($_SESSION['lojista_nome'] ?? $loja['user_name']);
+
+        // =========================================================
+        // PROCESSAMENTO DE ABERTURA DE CAIXA (POST)
+        // =========================================================
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao_caixa']) && $_POST['acao_caixa'] === 'abrir') {
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+            try {
+                // Impede segundo caixa aberto
+                $stmtCheck = $db->prepare("SELECT id FROM caixa_diario WHERE user_id = ? AND status = 'aberto' LIMIT 1");
+                $stmtCheck->execute([$userId]);
+                if ($stmtCheck->rowCount() > 0) {
+                    throw new Exception("Já existe um caixa aberto para esta loja! Feche o caixa atual antes de iniciar um novo.");
+                }
+
+                $valorInicial = (float)str_replace(',', '.', $_POST['valor_inicial'] ?? '0');
+                if ($valorInicial < 0) {
+                    throw new Exception("O valor inicial não pode ser negativo.");
+                }
+
+                $stmtIns = $db->prepare("INSERT INTO caixa_diario (user_id, usuario_abertura_id, usuario_abertura_nome, data_abertura, valor_inicial, status) VALUES (?, ?, ?, NOW(), ?, 'aberto')");
+                $stmtIns->execute([$userId, $sessaoUserId, $sessaoUserNome, $valorInicial]);
+
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => true, 'mensagem' => 'Caixa aberto com sucesso!']);
+                    exit;
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
+            }
+            header("Location: /" . $loja['user_virtual_env'] . "/admin");
+            exit;
+        }
+
+        // =========================================================
+        // PROCESSAMENTO DE FECHAMENTO DE CAIXA (POST)
+        // =========================================================
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao_caixa']) && $_POST['acao_caixa'] === 'fechar') {
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+            try {
+                $stmtCaixaAtivo = $db->prepare("SELECT * FROM caixa_diario WHERE user_id = ? AND status = 'aberto' LIMIT 1");
+                $stmtCaixaAtivo->execute([$userId]);
+                $caixaAtivo = $stmtCaixaAtivo->fetch(PDO::FETCH_ASSOC);
+
+                if (!$caixaAtivo) {
+                    throw new Exception("Nenhum caixa aberto encontrado para encerramento.");
+                }
+
+                $caixaId = (int)$caixaAtivo['id'];
+                $dataAbertura = $caixaAtivo['data_abertura'];
+                $valorInicial = (float)$caixaAtivo['valor_inicial'];
+                $valorInformado = (float)str_replace(',', '.', $_POST['valor_informado_fechamento'] ?? '0');
+                $obs = trim($_POST['observacoes_fechamento'] ?? '');
+
+                // Totaliza os pedidos finalizados realizados durante o período do caixa
+                $stmtVendas = $db->prepare("SELECT forma_pagamento, COALESCE(SUM(total), 0) as total_forma 
+                                            FROM ws_pedidos 
+                                            WHERE user_id = ? AND data >= ? AND LOWER(status) != 'cancelado' 
+                                            GROUP BY forma_pagamento");
+                $stmtVendas->execute([$userId, $dataAbertura]);
+                $vendasAgrupadas = $stmtVendas->fetchAll(PDO::FETCH_ASSOC);
+
+                $totalDinheiro = 0.00;
+                $totalPix      = 0.00;
+                $totalDebito   = 0.00;
+                $totalCredito  = 0.00;
+                $totalOutros   = 0.00;
+                $totalVendas   = 0.00;
+
+                foreach ($vendasAgrupadas as $vg) {
+                    $forma = strtolower(trim($vg['forma_pagamento']));
+                    $val   = (float)$vg['total_forma'];
+                    $totalVendas += $val;
+
+                    if (str_contains($forma, 'dinheiro')) {
+                        $totalDinheiro += $val;
+                    } elseif (str_contains($forma, 'pix')) {
+                        $totalPix += $val;
+                    } elseif (str_contains($forma, 'debito') || str_contains($forma, 'débito')) {
+                        $totalDebito += $val;
+                    } elseif (str_contains($forma, 'credito') || str_contains($forma, 'crédito')) {
+                        $totalCredito += $val;
+                    } else {
+                        $totalOutros += $val;
+                    }
+                }
+
+                // O dinheiro esperado em gaveta é: fundo inicial + vendas em dinheiro
+                $esperadoDinheiro = $valorInicial + $totalDinheiro;
+                $diferenca = $valorInformado - $esperadoDinheiro;
+
+                $upCaixa = $db->prepare("UPDATE caixa_diario SET 
+                                            usuario_fechamento_id = ?,
+                                            usuario_fechamento_nome = ?,
+                                            data_fechamento = NOW(),
+                                            valor_informado_fechamento = ?,
+                                            valor_esperado_dinheiro = ?,
+                                            diferenca = ?,
+                                            total_pix = ?,
+                                            total_debito = ?,
+                                            total_credito = ?,
+                                            total_outros = ?,
+                                            total_vendas = ?,
+                                            observacoes = ?,
+                                            status = 'fechado'
+                                         WHERE id = ?");
+
+                $upCaixa->execute([
+                    $sessaoUserId, $sessaoUserNome,
+                    $valorInformado, $esperadoDinheiro, $diferenca,
+                    $totalPix, $totalDebito, $totalCredito, $totalOutros, $totalVendas,
+                    $obs, $caixaId
+                ]);
+
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'sucesso'   => true,
+                        'mensagem'  => 'Caixa fechado com sucesso!',
+                        'diferenca' => $diferenca,
+                        'esperado'  => $esperadoDinheiro,
+                        'informado' => $valorInformado
+                    ]);
+                    exit;
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
+            }
+            header("Location: /" . $loja['user_virtual_env'] . "/admin");
+            exit;
+        }
+
+        // =========================================================
+        // CONSULTA DE STATUS DO CAIXA ATUAL & APURAÇÃO EM TEMPO REAL
+        // =========================================================
+        $stmtCaixa = $db->prepare("SELECT * FROM caixa_diario WHERE user_id = ? AND status = 'aberto' LIMIT 1");
+        $stmtCaixa->execute([$userId]);
+        $caixaAberto = $stmtCaixa->fetch(PDO::FETCH_ASSOC);
+
+        $totaisCaixaTurno = [
+            'dinheiro' => 0.00,
+            'pix'      => 0.00,
+            'debito'   => 0.00,
+            'credito'  => 0.00,
+            'outros'   => 0.00,
+            'total'    => 0.00
+        ];
+
+        if ($caixaAberto) {
+            $stmtTotaisTurno = $db->prepare("SELECT forma_pagamento, COALESCE(SUM(total), 0) as total_forma 
+                                             FROM ws_pedidos 
+                                             WHERE user_id = ? AND data >= ? AND LOWER(status) != 'cancelado' 
+                                             GROUP BY forma_pagamento");
+            $stmtTotaisTurno->execute([$userId, $caixaAberto['data_abertura']]);
+            $linhasTurno = $stmtTotaisTurno->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($linhasTurno as $lt) {
+                $f = strtolower(trim($lt['forma_pagamento']));
+                $v = (float)$lt['total_forma'];
+                $totaisCaixaTurno['total'] += $v;
+
+                if (str_contains($f, 'dinheiro')) {
+                    $totaisCaixaTurno['dinheiro'] += $v;
+                } elseif (str_contains($f, 'pix')) {
+                    $totaisCaixaTurno['pix'] += $v;
+                } elseif (str_contains($f, 'debito') || str_contains($f, 'débito')) {
+                    $totaisCaixaTurno['debito'] += $v;
+                } elseif (str_contains($f, 'credito') || str_contains($f, 'crédito')) {
+                    $totaisCaixaTurno['credito'] += $v;
+                } else {
+                    $totaisCaixaTurno['outros'] += $v;
+                }
+            }
+        }
+
+        // Ações de alteração de status do Pedido via POST (Kanban)
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao_pedido'])) {
             $pedidoId = (int)$_POST['pedido_id'];
             $novoStatus = trim($_POST['novo_status']);
@@ -92,7 +282,6 @@ class LojistaController {
                 $paramsH[] = $stFiltro;
             }
 
-            // NOVO FILTRO: Forma de Pagamento
             if (!empty($pgFiltro)) {
                 $sqlH .= " AND LOWER(forma_pagamento) = LOWER(?)";
                 $paramsH[] = $pgFiltro;
@@ -107,7 +296,7 @@ class LojistaController {
             exit;
         }
 
-        // Busca formas de pagamento cadastradas pelo lojista (ws_formas_pagamento)
+        // Formas de pagamento do lojista
         $stmtFormasPgto = $db->prepare("SELECT id_f_pagamento, f_pagamento FROM ws_formas_pagamento WHERE user_id = ? ORDER BY f_pagamento ASC");
         $stmtFormasPgto->execute([$userId]);
         $formasPagamentoLojista = $stmtFormasPgto->fetchAll(PDO::FETCH_ASSOC);
@@ -149,7 +338,6 @@ class LojistaController {
         $stmt->execute($params);
         $pedidos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Agrupamento para as 4 Fases
         $faseRecebido   = [];
         $faseAndamento  = [];
         $faseEntrega    = [];
@@ -174,14 +362,16 @@ class LojistaController {
             }
         }
 
-        // Estatísticas
-        $stmtVendasHoje = $db->prepare("SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as qtd FROM ws_pedidos WHERE user_id = ? AND DATE(data) = CURDATE()");
+        // Estatísticas diárias
+        $stmtVendasHoje = $db->prepare("SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as qtd FROM ws_pedidos WHERE user_id = ? AND DATE(data) = CURDATE() AND LOWER(status) != 'cancelado'");
         $stmtVendasHoje->execute([$userId]);
         $statsHoje = $stmtVendasHoje->fetch(PDO::FETCH_ASSOC);
 
         $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
         require_once __DIR__ . "/../../views/{$pastaLogista}/dashboard.php";
     }
+
+
 
     /**
      * Gestão de Produtos (ws_itens)  com suporte a AJAX
