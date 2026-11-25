@@ -100,7 +100,6 @@ class ClienteController {
      * - Notificação automática (view = 0) para o Kanban e alarme sonoro
      */
     public function salvarPedido(array $loja): void {
-        // Limpa qualquer saída anterior no buffer para garantir JSON puro sem warnings
         if (ob_get_length()) ob_clean();
         header('Content-Type: application/json; charset=utf-8');
 
@@ -123,11 +122,8 @@ class ClienteController {
             $nome       = trim($dados['nome'] ?? 'Cliente');
             $telefone   = preg_replace('/\D/', '', $dados['telefone'] ?? '');
             $rua        = trim($dados['rua'] ?? '');
-            
-            // Tratamento rigoroso para 'unidade' (campo int(11) NOT NULL no MySQL)
             $numeroRaw  = preg_replace('/\D/', '', $dados['numero'] ?? '');
             $unidade    = !empty($numeroRaw) ? (int)$numeroRaw : 0;
-
             $bairro     = trim($dados['bairro_nome'] ?? '');
             $cidade     = trim($dados['cidade'] ?? 'Caçapava');
             $uf         = trim($dados['uf'] ?? 'SP');
@@ -136,11 +132,23 @@ class ClienteController {
             $subtotal   = (float)($dados['subtotal'] ?? 0);
             $total      = (float)($dados['total'] ?? 0);
 
-            // Código único do pedido no padrão da base (ex: PED1126-4821)
+            // NOVOS CAMPOS: DINHEIRO E TROCO
+            $vRecebido  = (float)($dados['valor_recebido'] ?? 0);
+            $vTroco     = (float)($dados['troco'] ?? 0);
+
             $codigoPedido = 'PED' . date('my') . '-' . rand(100, 9999);
 
-            // 1. Monta o resumo_pedidos formatado em HTML com os itens e seus adicionais de lanche
             $resumoHtml = "";
+
+            // Se for dinheiro e houver valor recebido, destaca no topo do resumo para o lojista ver logo
+            if ($vRecebido > 0) {
+                $resumoHtml .= "<div style='background:#fdf6e3; padding:5px; border:1px solid #ddd;'>";
+                $resumoHtml .= "<b>[ PAGAMENTO EM DINHEIRO ]</b><br />";
+                $resumoHtml .= "<b>Valor Entregue:</b> R$ " . number_format($vRecebido, 2, ',', '.') . "<br />";
+                $resumoHtml .= "<b style='color:red;'>Troco a Devolver: R$ " . number_format($vTroco, 2, ',', '.') . "</b><br />";
+                $resumoHtml .= "</div><br />";
+            }
+
             foreach ($dados['itens'] as $item) {
                 $itemNome = htmlspecialchars($item['nome']);
                 $itemQtd  = (int)($item['quantidade'] ?? 1);
@@ -160,28 +168,18 @@ class ClienteController {
                 $resumoHtml .= "<b>OBS:</b> {$itemObs}<br /><br />";
             }
 
-            // 2. Adiciona a seção de Molhos do Pedido com o cálculo e detalhamento das 2 cortesias da casa
             if (!empty($dados['molhos']) && is_array($dados['molhos'])) {
-                $resumoHtml .= "<b>--- MOLHOS / COMPLEMENTOS (Até 2 Cortesias) ---</b><br />";
+                $resumoHtml .= "<b>--- MOLHOS / COMPLEMENTOS ---</b><br />";
                 $unidadesGratisAplicadas = 0;
-
                 foreach ($dados['molhos'] as $molho) {
-                    $mQtd  = (int)($molho['qtd'] ?? 1);
+                    $mQtd = (int)($molho['qtd'] ?? 1);
                     $mNome = htmlspecialchars($molho['nome'] ?? 'Molho');
-                    $mVal  = (float)($molho['valor'] ?? 0);
-
-                    $qtdGratis = 0;
-                    $qtdPaga   = 0;
-
+                    $mVal = (float)($molho['valor'] ?? 0);
+                    $qtdGratis = 0; $qtdPaga = 0;
                     for ($u = 0; $u < $mQtd; $u++) {
-                        if ($unidadesGratisAplicadas < 2) {
-                            $unidadesGratisAplicadas++;
-                            $qtdGratis++;
-                        } else {
-                            $qtdPaga++;
-                        }
+                        if ($unidadesGratisAplicadas < 2) { $unidadesGratisAplicadas++; $qtdGratis++; }
+                        else { $qtdPaga++; }
                     }
-
                     if ($qtdGratis > 0 && $qtdPaga > 0) {
                         $valTotalPago = number_format($qtdPaga * $mVal, 2, ',', '.');
                         $resumoHtml .= "• <b>{$mQtd}x {$mNome}</b> ({$qtdGratis}x Cortesia + {$qtdPaga}x R$ {$valTotalPago})<br />";
@@ -195,26 +193,23 @@ class ClienteController {
                 $resumoHtml .= "<br />";
             }
 
-            // Grava endereço se o cliente estiver logado
             if ($clienteId && !empty($rua)) {
                 try {
                     $stmtEnd = $this->db->prepare("INSERT INTO ws_clientes_enderecos (cliente_id, rua, numero, bairro, cidade, uf) VALUES (?, ?, ?, ?, ?, ?)");
                     $stmtEnd->execute([$clienteId, $rua, (string)$unidade, $bairro, $cidade, $uf]);
-                } catch (Exception $eEnd) {
-                    // Ignora falha secundária de histórico de endereço para não travar o fechamento do pedido
-                }
+                } catch (Exception $eEnd) {}
             }
 
-            // INSERT EXATO NAS COLUNAS DE ws_pedidos (view = 0 ativa alarme no Kanban do lojista)
+            // INSERT ATUALIZADO COM VALOR_RECEBIDO E VALOR_TROCO
             $sql = "INSERT INTO ws_pedidos (
                         user_id, cliente_id, codigo_pedido, data, data_chart, data_chart2,
-                        resumo_pedidos, forma_pagamento, valor_troco, opcao_delivery, valor_taxa,
+                        resumo_pedidos, forma_pagamento, valor_recebido, valor_troco, opcao_delivery, valor_taxa,
                         telefone_empresa, adicionais, sub_total, total, nome, telefone,
                         rua, unidade, bairro, cidade, uf, complemento, observacao,
                         name_observacao_mesa, status, mes, ano, view, desconto, confirm_whatsapp, msg_delivery_false
                     ) VALUES (
                         ?, ?, ?, NOW(), DATE_FORMAT(NOW(), '%Y-%m'), CURDATE(),
-                        ?, ?, 0.00, 'true', ?,
+                        ?, ?, ?, ?, 'true', ?,
                         ?, '0', ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, '', '',
                         '', 'Aberto', DATE_FORMAT(NOW(), '%m'), DATE_FORMAT(NOW(), '%y'), 0, 0, 'false', ''
@@ -229,6 +224,8 @@ class ClienteController {
                 $codigoPedido,
                 $resumoHtml,
                 $pgto,
+                $vRecebido, // Novo campo
+                $vTroco,    // Campo populado com o cálculo
                 $taxa,
                 $telEmpresa,
                 $subtotal,
@@ -252,17 +249,8 @@ class ClienteController {
             ], JSON_UNESCAPED_UNICODE);
             exit;
 
-        } catch (PDOException $e) {
-            echo json_encode([
-                'sucesso'  => false,
-                'mensagem' => 'Erro de banco de dados: ' . $e->getMessage()
-            ], JSON_UNESCAPED_UNICODE);
-            exit;
         } catch (Exception $e) {
-            echo json_encode([
-                'sucesso'  => false,
-                'mensagem' => 'Erro geral: ' . $e->getMessage()
-            ], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['sucesso'  => false, 'mensagem' => 'Erro: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
             exit;
         }
     }

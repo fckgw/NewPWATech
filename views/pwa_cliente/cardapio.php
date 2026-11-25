@@ -647,12 +647,24 @@ $telefoneFormatado = !empty($empresa->telefone_empresa) ? $empresa->telefone_emp
                 </div>
                 <div class="mb-3">
                     <label class="small fw-bold text-muted">FORMA DE PAGAMENTO</label>
-                    <select id="f-pgto" class="form-select rounded-3">
+                    <select id="f-pgto" class="form-select rounded-3" onchange="verificarPgtoDinheiro(this.value)">
                         <?php foreach ($pagamentos as $pg): ?>
                             <option value="<?= htmlspecialchars($pg->f_pagamento) ?>"><?= htmlspecialchars($pg->f_pagamento) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
+
+            <!-- NOVO BLOCO: TROCO (Aparece apenas se selecionar Dinheiro) -->
+            <div id="box-troco" class="mb-3 animate__animated animate__fadeIn" style="display:none;">
+                <div class="card border-warning bg-warning bg-opacity-10 p-3 rounded-4">
+                    <label class="small fw-bold text-dark mb-1">VAI PRECISAR DE TROCO?</label>
+                    <div class="input-group mb-2">
+                        <span class="input-group-text bg-white border-0 rounded-start-3">R$</span>
+                        <input type="tel" id="f-dinheiro-recebido" class="form-control border-0 py-2 px-3 shadow-sm" placeholder="Quanto vai pagar em dinheiro?" onkeyup="calcularTroco()">
+                    </div>
+                    <div id="resultado-troco" class="small fw-bold text-danger text-center"></div>
+                </div>
+            </div>
             </div>
 
             <div class="bg-dark text-white p-4 rounded-4 mb-4 shadow-lg">
@@ -1015,146 +1027,158 @@ $telefoneFormatado = !empty($empresa->telefone_empresa) ? $empresa->telefone_emp
             $("#f-total").text("R$ " + totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2}));
         }
 
-        function enviarPedidoFinal() {
-            var btn = document.getElementById("btnConcluirPedido");
-            if (btn) btn.blur();
-            if (document.activeElement) document.activeElement.blur();
-
-            var nome   = $("#f-nome").val().trim();
-            var tel    = $("#f-tel").val().trim();
-            var rua    = $("#f-rua").val().trim();
-            var num    = $("#f-num").val().trim();
-            var bId    = $("#f-bairro").val();
-            var bNome  = $("#f-bairro option:selected").text().trim();
-            var taxa   = parseFloat($("#f-bairro option:selected").data("taxa") || 0);
-            var pgto   = $("#f-pgto").val();
-
-            if (!nome || !tel || !rua || bId === "0") {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Campos Obrigatórios',
-                    text: 'Por favor, informe seu Nome, WhatsApp, Bairro e Rua para a entrega.',
-                    confirmButtonColor: '#d31018'
-                });
-                return;
+        function verificarPgtoDinheiro(valor) {
+            // Verifica se a string contém "Dinheiro" (ignora maiúsculas/minúsculas)
+            if (valor.toLowerCase().includes('dinheiro')) {
+                $("#box-troco").show();
+            } else {
+                $("#box-troco").hide();
+                $("#f-dinheiro-recebido").val('');
+                $("#resultado-troco").html('');
             }
-
-            if (carrinho.length === 0) {
-                Swal.fire({ 
-                    icon: 'info', 
-                    title: 'Carrinho Vazio', 
-                    text: 'Selecione ao menos um produto antes de concluir o pedido!',
-                    confirmButtonColor: '#d31018'
-                });
-                return;
-            }
-
-            var subtotalLanches = carrinho.reduce((sum, i) => sum + i.totalItem, 0);
-            var totalMolhosCobrados = 0;
-            var unidadesGratis = 0;
-
-            Object.values(molhosSelecionados).forEach(m => {
-                for (var u = 0; u < m.qtd; u++) {
-                    if (unidadesGratis < 2) unidadesGratis++;
-                    else totalMolhosCobrados += m.valor;
-                }
-            });
-
-            var totalGeral = subtotalLanches + totalMolhosCobrados + taxa;
-
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> PROCESSANDO PEDIDO...';
-            }
-
-            Swal.fire({
-                title: 'Gravando Pedido...',
-                text: 'Enviando seu pedido diretamente para a cozinha.',
-                allowOutsideClick: false,
-                didOpen: () => { Swal.showLoading(); }
-            });
-
-            var payload = {
-                nome: nome,
-                telefone: tel,
-                rua: rua,
-                numero: num,
-                bairro_id: bId,
-                bairro_nome: bNome,
-                forma_pagamento: pgto,
-                taxa_entrega: taxa,
-                subtotal: (subtotalLanches + totalMolhosCobrados),
-                total: totalGeral,
-                itens: carrinho,
-                molhos: Object.values(molhosSelecionados)
-            };
-
-            fetch('/<?= $slug ?>?acao_cliente=salvar_pedido', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                body: JSON.stringify(payload)
-            })
-            .then(response => response.text())
-            .then(textoRecebido => {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-check-circle me-2"></i> CONCLUIR O PEDIDO';
-                }
-
-                var res;
-                try {
-                    res = JSON.parse(textoRecebido);
-                } catch (errJson) {
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Erro de Resposta do Servidor',
-                        html: `<div class="text-start small" style="max-height:220px; overflow-y:auto; background:#1b2e4b; color:#fff; padding:10px; border-radius:8px;">${textoRecebido}</div>`,
-                        confirmButtonColor: '#ef4444'
-                    });
-                    return;
-                }
-
-                if (res.sucesso) {
-                    carrinho = [];
-                    molhosSelecionados = {};
-                    atualizarBarraCarrinho();
-                    fecharCheckout();
-
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'Pedido Confirmado!',
-                        html: `<div style="font-size: 1.15rem; line-height: 1.6;">
-                                 Pedido número <b>#${res.codigo_pedido}</b> foi gerado com sucesso!<br>
-                                 <span class="text-muted" style="font-size: 0.95rem;">Aguarde as atualizações no seu WhatsApp.</span>
-                               </div>`,
-                        confirmButtonColor: '#d31018',
-                        confirmButtonText: 'Entendido, Obrigado!'
-                    });
-                } else {
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Erro ao Gravar',
-                        text: res.mensagem || 'Ocorreu uma falha ao registrar o pedido no banco.',
-                        confirmButtonColor: '#ef4444'
-                    });
-                }
-            })
-            .catch(err => {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-check-circle me-2"></i> CONCLUIR O PEDIDO';
-                }
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Falha de Comunicação',
-                    text: 'Não foi possível se comunicar com o servidor: ' + err.message,
-                    confirmButtonColor: '#ef4444'
-                });
-            });
         }
+
+        function calcularTroco() {
+            var totalGeralStr = $("#f-total").text().replace('R$ ', '').replace('.', '').replace(',', '.');
+            var totalGeral = parseFloat(totalGeralStr) || 0;
+            
+            var recebidoStr = $("#f-dinheiro-recebido").val().replace('.', '').replace(',', '.');
+            var recebido = parseFloat(recebidoStr) || 0;
+            
+            var resultadoDiv = $("#resultado-troco");
+
+            if (recebido > 0) {
+                if (recebido < totalGeral) {
+                    resultadoDiv.html('<i class="fas fa-exclamation-circle"></i> O valor deve ser maior que o total do pedido!');
+                    resultadoDiv.removeClass('text-success').addClass('text-danger');
+                } else {
+                    var troco = recebido - totalGeral;
+                    resultadoDiv.html('<i class="fas fa-coins"></i> Seu troco será de: <b>R$ ' + troco.toLocaleString('pt-BR', {minimumFractionDigits: 2}) + '</b>');
+                    resultadoDiv.removeClass('text-danger').addClass('text-success');
+                }
+            } else {
+                resultadoDiv.html('');
+            }
+        }
+
+        function enviarPedidoFinal() {
+        var btn = document.getElementById("btnConcluirPedido");
+        if (btn) btn.blur();
+
+        var nome   = $("#f-nome").val().trim();
+        var tel    = $("#f-tel").val().trim();
+        var rua    = $("#f-rua").val().trim();
+        var num    = $("#f-num").val().trim();
+        var bId    = $("#f-bairro").val();
+        var bNome  = $("#f-bairro option:selected").text().trim();
+        var taxa   = parseFloat($("#f-bairro option:selected").data("taxa") || 0);
+        var pgto   = $("#f-pgto").val();
+
+        // Lógica de Troco
+        var valorRecebido = 0;
+        var valorTroco = 0;
+        var totalGeralStr = $("#f-total").text().replace('R$ ', '').replace('.', '').replace(',', '.');
+        var totalGeral = parseFloat(totalGeralStr) || 0;
+
+        if (pgto.toLowerCase().includes('dinheiro')) {
+            var recebidoStr = $("#f-dinheiro-recebido").val().replace('.', '').replace(',', '.');
+            valorRecebido = parseFloat(recebidoStr) || 0;
+
+            if (valorRecebido <= 0) {
+                Swal.fire({ icon: 'warning', title: 'Valor em Dinheiro', text: 'Por favor, informe quanto você terá em dinheiro para calcularmos o troco.', confirmButtonColor: '#d31018' });
+                return;
+            }
+            if (valorRecebido < totalGeral) {
+                Swal.fire({ icon: 'error', title: 'Valor Insuficiente', text: 'O valor em dinheiro informado é menor que o total do pedido!', confirmButtonColor: '#d31018' });
+                return;
+            }
+            valorTroco = valorRecebido - totalGeral;
+        }
+
+        if (!nome || !tel || !rua || bId === "0") {
+            Swal.fire({ icon: 'warning', title: 'Campos Obrigatórios', text: 'Por favor, preencha todos os dados de entrega.', confirmButtonColor: '#d31018' });
+            return;
+        }
+
+        if (carrinho.length === 0) {
+            Swal.fire({ icon: 'info', title: 'Carrinho Vazio', text: 'Selecione ao menos um produto.', confirmButtonColor: '#d31018' });
+            return;
+        }
+
+        // Cálculos de subtotal (molhos + lanches)
+        var subtotalLanches = carrinho.reduce((sum, i) => sum + i.totalItem, 0);
+        var totalMolhosCobrados = 0;
+        var unidadesGratis = 0;
+        Object.values(molhosSelecionados).forEach(m => {
+            for (var u = 0; u < m.qtd; u++) {
+                if (unidadesGratis < 2) unidadesGratis++;
+                else totalMolhosCobrados += m.valor;
+            }
+        });
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> PROCESSANDO...';
+        }
+
+        Swal.fire({ title: 'Gravando Pedido...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+
+        // Payload atualizado com Valor Recebido e Troco
+        var payload = {
+            nome: nome,
+            telefone: tel,
+            rua: rua,
+            numero: num,
+            bairro_id: bId,
+            bairro_nome: bNome,
+            forma_pagamento: pgto,
+            taxa_entrega: taxa,
+            subtotal: (subtotalLanches + totalMolhosCobrados),
+            total: totalGeral,
+            valor_recebido: valorRecebido, // <--- NOVO
+            troco: valorTroco,             // <--- NOVO
+            itens: carrinho,
+            molhos: Object.values(molhosSelecionados)
+        };
+
+        fetch('/<?= $slug ?>?acao_cliente=salvar_pedido', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.text())
+        .then(textoRecebido => {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-check-circle me-2"></i> CONCLUIR O PEDIDO';
+            }
+
+            var res;
+            try { res = JSON.parse(textoRecebido); } catch (errJson) { 
+                console.error(textoRecebido);
+                return; 
+            }
+
+            if (res.sucesso) {
+                carrinho = [];
+                molhosSelecionados = {};
+                atualizarBarraCarrinho();
+                fecharCheckout();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Pedido Confirmado!',
+                    html: `Pedido número <b>#${res.codigo_pedido}</b> gerado com sucesso!`,
+                    confirmButtonColor: '#d31018'
+                });
+            } else {
+                Swal.fire({ icon: 'error', title: 'Erro', text: res.mensagem });
+            }
+        })
+        .catch(err => {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle me-2"></i> CONCLUIR O PEDIDO'; }
+            Swal.fire({ icon: 'error', title: 'Falha', text: err.message });
+        });
+    }
     </script>
 </body>
 </html>
