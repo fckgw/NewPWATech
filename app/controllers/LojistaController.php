@@ -7,12 +7,12 @@ require_once $dbPath;
 $authPath = is_file(__DIR__ . '/../Security/Auth.php') ? __DIR__ . '/../Security/Auth.php' : __DIR__ . '/../security/Auth.php';
 require_once $authPath;
 
-// Carregamento defensivo de WhatsAppService (suporta app/Services ou app/services)
+// Carregamento defensivo de WhatsAppService
 $whatsPaths = [
     __DIR__ . '/../Services/WhatsAppService.php',
     __DIR__ . '/../services/WhatsAppService.php',
-    __DIR__ . '/../Services/whatsappservice.php',
-    __DIR__ . '/../services/whatsappservice.php'
+    __DIR__ . '/../Service/WhatsAppService.php',
+    __DIR__ . '/../service/WhatsAppService.php'
 ];
 
 $carregouWhats = false;
@@ -24,16 +24,20 @@ foreach ($whatsPaths as $wPath) {
     }
 }
 
-// Fallback defensivo: se o arquivo não estiver no servidor, define a classe provisória para a página não quebrar
+// Fallback defensivo caso o arquivo não exista
 if (!$carregouWhats && !class_exists('WhatsAppService')) {
     class WhatsAppService {
+        public static function formatarNumero(string $telefone): string {
+            $num = preg_replace('/\D/', '', $telefone);
+            if (strlen($num) === 10 || strlen($num) === 11) $num = '55' . $num;
+            return $num;
+        }
         public static function gerarLinkStatus(array $p, string $l): string {
-            $num = preg_replace('/\D/', '', $p['telefone'] ?? '');
-            return "https://api.whatsapp.com/send?phone=55{$num}&text=" . urlencode("Status do seu pedido #{$p['codigo_pedido']} atualizado no {$l}!");
+            $num = self::formatarNumero($p['telefone'] ?? '');
+            return "https://api.whatsapp.com/send?phone={$num}&text=" . urlencode("Status do seu pedido #{$p['codigo_pedido']} atualizado no {$l}!");
         }
     }
 }
-
 
 class LojistaController {
 
@@ -43,12 +47,6 @@ class LojistaController {
         $this->db = Conexao::getConexao();
     }
 
-    /**
-     * Dashboard Principal com Kanban de Pedidos & Faturamento
-     */
-     /**
-     * Dashboard Principal com Kanban Otimizado & Histórico
-     */
     /**
      * Dashboard Principal com Kanban, Caixa Diário & Histórico
      */
@@ -66,7 +64,6 @@ class LojistaController {
             $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
             try {
-                // Impede segundo caixa aberto
                 $stmtCheck = $db->prepare("SELECT id FROM caixa_diario WHERE user_id = ? AND status = 'aberto' LIMIT 1");
                 $stmtCheck->execute([$userId]);
                 if ($stmtCheck->rowCount() > 0) {
@@ -118,7 +115,7 @@ class LojistaController {
                 $valorInformado = (float)str_replace(',', '.', $_POST['valor_informado_fechamento'] ?? '0');
                 $obs = trim($_POST['observacoes_fechamento'] ?? '');
 
-                // Totaliza os pedidos finalizados realizados durante o período do caixa
+                // Totaliza os pedidos do turno
                 $stmtVendas = $db->prepare("SELECT forma_pagamento, COALESCE(SUM(total), 0) as total_forma 
                                             FROM ws_pedidos 
                                             WHERE user_id = ? AND data >= ? AND LOWER(status) != 'cancelado' 
@@ -151,7 +148,6 @@ class LojistaController {
                     }
                 }
 
-                // O dinheiro esperado em gaveta é: fundo inicial + vendas em dinheiro
                 $esperadoDinheiro = $valorInicial + $totalDinheiro;
                 $diferenca = $valorInformado - $esperadoDinheiro;
 
@@ -201,7 +197,7 @@ class LojistaController {
         }
 
         // =========================================================
-        // CONSULTA DE STATUS DO CAIXA ATUAL & APURAÇÃO EM TEMPO REAL
+        // STATUS DO CAIXA ATUAL & APURAÇÃO EM TEMPO REAL
         // =========================================================
         $stmtCaixa = $db->prepare("SELECT * FROM caixa_diario WHERE user_id = ? AND status = 'aberto' LIMIT 1");
         $stmtCaixa->execute([$userId]);
@@ -243,7 +239,7 @@ class LojistaController {
             }
         }
 
-        // Ações de alteração de status do Pedido via POST (Kanban)
+        // Transição de status do Pedido Kanban (POST)
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao_pedido'])) {
             $pedidoId = (int)$_POST['pedido_id'];
             $novoStatus = trim($_POST['novo_status']);
@@ -266,7 +262,7 @@ class LojistaController {
             exit;
         }
 
-        // Endpoint AJAX para buscar histórico com filtros (Data, Status e Forma de Pagamento)
+        // Endpoint AJAX Histórico
         if (isset($_GET['ajax_historico'])) {
             header('Content-Type: application/json');
             $dtIni    = !empty($_GET['dt_ini']) ? $_GET['dt_ini'] . ' 00:00:00' : date('Y-m-01 00:00:00');
@@ -281,7 +277,6 @@ class LojistaController {
                 $sqlH .= " AND LOWER(status) = LOWER(?)";
                 $paramsH[] = $stFiltro;
             }
-
             if (!empty($pgFiltro)) {
                 $sqlH .= " AND LOWER(forma_pagamento) = LOWER(?)";
                 $paramsH[] = $pgFiltro;
@@ -296,7 +291,7 @@ class LojistaController {
             exit;
         }
 
-        // Formas de pagamento do lojista
+        // Formas de pagamento
         $stmtFormasPgto = $db->prepare("SELECT id_f_pagamento, f_pagamento FROM ws_formas_pagamento WHERE user_id = ? ORDER BY f_pagamento ASC");
         $stmtFormasPgto->execute([$userId]);
         $formasPagamentoLojista = $stmtFormasPgto->fetchAll(PDO::FETCH_ASSOC);
@@ -362,7 +357,6 @@ class LojistaController {
             }
         }
 
-        // Estatísticas diárias
         $stmtVendasHoje = $db->prepare("SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as qtd FROM ws_pedidos WHERE user_id = ? AND DATE(data) = CURDATE() AND LOWER(status) != 'cancelado'");
         $stmtVendasHoje->execute([$userId]);
         $statsHoje = $stmtVendasHoje->fetch(PDO::FETCH_ASSOC);
@@ -371,17 +365,13 @@ class LojistaController {
         require_once __DIR__ . "/../../views/{$pastaLogista}/dashboard.php";
     }
 
-
-
     /**
-     * Gestão de Produtos (ws_itens)  com suporte a AJAX
+     * Gestão de Produtos (ws_itens) com suporte a AJAX
      */
-    
     public function produtos(array $loja): void {
         $userId = (int)$loja['user_id'];
         $db = $this->db;
 
-        // Processamento de Ações via POST (Salvar, Editar, Excluir)
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $acao = $_POST['acao'] ?? '';
             $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
@@ -395,7 +385,6 @@ class LojistaController {
                     $disp  = isset($_POST['disponivel']) ? 1 : 0;
                     $id    = (int)($_POST['id_item'] ?? 0);
 
-                    // Upload de imagem opcional
                     $imgSql = "";
                     $imgParams = [];
                     if (!empty($_FILES['imagem']['name'])) {
@@ -409,14 +398,12 @@ class LojistaController {
                     }
 
                     if ($id > 0) {
-                        // EDIÇÃO
                         $sql = "UPDATE ws_itens SET id_cat = ?, nome_item = ?, descricao_item = ?, preco_item = ?, disponivel = ? {$imgSql} WHERE id = ? AND user_id = ?";
                         $params = array_merge([$catId, $nome, $desc, $preco, $disp], $imgParams, [$id, $userId]);
                         $stmt = $db->prepare($sql);
                         $stmt->execute($params);
                         $msg = "Produto \"{$nome}\" atualizado com sucesso!";
                     } else {
-                        // CADASTRO NOVO
                         $imgFinal = !empty($imgParams) ? $imgParams[0] : 'false';
                         $sql = "INSERT INTO ws_itens (user_id, id_cat, nome_item, descricao_item, preco_item, img_item, disponivel, dia_semana, number_adicional) VALUES (?, ?, ?, ?, ?, ?, ?, 'Domingo,Segunda,Terça,Quarta,Quinta,Sexta,Sabado', 0)";
                         $stmt = $db->prepare($sql);
@@ -458,7 +445,6 @@ class LojistaController {
             exit;
         }
 
-        // Listagem de Categorias e Produtos
         $stmtCats = $db->prepare("SELECT id, nome_cat FROM ws_cat WHERE user_id = ? ORDER BY nome_cat ASC");
         $stmtCats->execute([$userId]);
         $categorias = $stmtCats->fetchAll(PDO::FETCH_ASSOC);
@@ -472,8 +458,114 @@ class LojistaController {
     }
 
     /**
-     * Gestão de Categorias (ws_cat)
+     * Gestão de Adicionais e Molhos (ws_adicionais_itens) com Upload Seguro de Fotos
      */
+    public function adicionais(array $loja): void {
+        $userId = (int)$loja['user_id'];
+        $db = $this->db;
+
+        try {
+            $db->exec("ALTER TABLE `ws_adicionais_itens` ADD COLUMN `img_adicional` VARCHAR(255) NULL DEFAULT NULL");
+        } catch (Exception $e) {}
+
+        $uploadDir = __DIR__ . '/../../uploads';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0777, true);
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $acao = $_POST['acao'] ?? '';
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+            try {
+                if ($acao === 'salvar') {
+                    $nome      = trim($_POST['nome_adicional'] ?? '');
+                    $valor     = (float)str_replace(',', '.', $_POST['valor_adicional'] ?? '0');
+                    $medida    = trim($_POST['medida_adicional'] ?? 'UN');
+                    $status    = isset($_POST['status_adicional']) ? 1 : 0;
+                    $id        = (int)($_POST['id_adicionais'] ?? 0);
+                    $tipoItem  = trim($_POST['tipo_item'] ?? 'adicional');
+
+                    if (empty($nome)) {
+                        throw new Exception("O nome do item é obrigatório!");
+                    }
+
+                    if ($tipoItem === 'molho') {
+                        $catsStr = 'molho';
+                    } else {
+                        $catsArray = $_POST['categorias_adicional'] ?? [];
+                        $catsStr = !empty($catsArray) ? implode(', ', $catsArray) : '0';
+                    }
+
+                    $imgSql = "";
+                    $imgParams = [];
+                    if (!empty($_FILES['img_adicional']['name']) && $_FILES['img_adicional']['error'] === UPLOAD_ERR_OK) {
+                        $ext = strtolower(pathinfo($_FILES['img_adicional']['name'], PATHINFO_EXTENSION));
+                        $novoNome = 'adic_' . $userId . '_' . time() . '_' . rand(100, 999) . '.' . $ext;
+                        $dest = $uploadDir . '/' . $novoNome;
+                        if (move_uploaded_file($_FILES['img_adicional']['tmp_name'], $dest)) {
+                            @chmod($dest, 0644);
+                            $imgSql = ", img_adicional = ?";
+                            $imgParams[] = $novoNome;
+                        }
+                    }
+
+                    if ($id > 0) {
+                        $sql = "UPDATE ws_adicionais_itens SET categorias_adicional = ?, nome_adicional = ?, valor_adicional = ?, medida_adicional = ?, status_adicional = ? {$imgSql} WHERE id_adicionais = ? AND user_id = ?";
+                        $params = array_merge([$catsStr, $nome, $valor, $medida, $status], $imgParams, [$id, $userId]);
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute($params);
+                        $msg = "Item \"{$nome}\" atualizado com sucesso!";
+                    } else {
+                        $imgFinal = !empty($imgParams) ? $imgParams[0] : null;
+                        $sql = "INSERT INTO ws_adicionais_itens (user_id, categorias_adicional, nome_adicional, valor_adicional, medida_adicional, status_adicional, img_adicional) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([$userId, $catsStr, $nome, $valor, $medida, $status, $imgFinal]);
+                        $msg = "Item \"{$nome}\" cadastrado com sucesso!";
+                    }
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => $msg]);
+                        exit;
+                    }
+                }
+
+                if ($acao === 'excluir') {
+                    $id = (int)$_POST['id'];
+                    $del = $db->prepare("DELETE FROM ws_adicionais_itens WHERE id_adicionais = ? AND user_id = ?");
+                    $del->execute([$id, $userId]);
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => "Item removido com sucesso!"]);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
+            }
+
+            header("Location: /" . $loja['user_virtual_env'] . "/admin?secao=adicionais");
+            exit;
+        }
+
+        $stmtCats = $db->prepare("SELECT id, nome_cat FROM ws_cat WHERE user_id = ? ORDER BY nome_cat ASC");
+        $stmtCats->execute([$userId]);
+        $categorias = $stmtCats->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmtAdic = $db->prepare("SELECT * FROM ws_adicionais_itens WHERE user_id = ? ORDER BY id_adicionais DESC");
+        $stmtAdic->execute([$userId]);
+        $adicionais = $stmtAdic->fetchAll(PDO::FETCH_ASSOC);
+
+        $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
+        require_once __DIR__ . "/../../views/{$pastaLogista}/adicionais.php";
+    }
+
     /**
      * Gestão de Categorias (ws_cat) com suporte a AJAX
      */
@@ -543,9 +635,8 @@ class LojistaController {
         require_once __DIR__ . "/../../views/{$pastaLogista}/categorias.php";
     }
 
-
     /**
-     * Gestão de Taxas de Entrega / Bairros (bairros_delivery)
+     * Gestão de Taxas de Entrega / Bairros (bairros_delivery) com suporte a AJAX
      */
     public function taxas(array $loja): void {
         $userId = (int)$loja['user_id'];
@@ -553,28 +644,61 @@ class LojistaController {
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $acao = $_POST['acao'] ?? '';
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
-            if ($acao === 'salvar') {
-                $bairro = trim($_POST['bairro']);
-                $cidade = trim($_POST['cidade'] ?? 'Minha Cidade');
-                $uf     = strtoupper(trim($_POST['uf'] ?? 'SP'));
-                $taxa   = (float)str_replace(',', '.', $_POST['taxa']);
+            try {
+                if ($acao === 'salvar') {
+                    $bairro = trim($_POST['bairro'] ?? '');
+                    $cidade = trim($_POST['cidade'] ?? 'Caçapava');
+                    $uf     = strtoupper(trim($_POST['uf'] ?? 'SP'));
+                    $taxa   = (float)str_replace(',', '.', $_POST['taxa'] ?? '0');
+                    $id     = (int)($_POST['id_bairro'] ?? 0);
 
-                $stmt = $db->prepare("INSERT INTO bairros_delivery (user_id, uf, cidade, bairro, taxa) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$userId, $uf, $cidade, $bairro, $taxa]);
+                    if (empty($bairro)) {
+                        throw new Exception("O nome do bairro é obrigatório!");
+                    }
+
+                    if ($id > 0) {
+                        $stmt = $db->prepare("UPDATE bairros_delivery SET uf = ?, cidade = ?, bairro = ?, taxa = ? WHERE id = ? AND user_id = ?");
+                        $stmt->execute([$uf, $cidade, $bairro, $taxa, $id, $userId]);
+                        $msg = "Bairro \"{$bairro}\" atualizado com sucesso!";
+                    } else {
+                        $stmt = $db->prepare("INSERT INTO bairros_delivery (user_id, uf, cidade, bairro, taxa) VALUES (?, ?, ?, ?, ?)");
+                        $stmt->execute([$userId, $uf, $cidade, $bairro, $taxa]);
+                        $msg = "Bairro \"{$bairro}\" cadastrado com sucesso!";
+                    }
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => $msg]);
+                        exit;
+                    }
+                }
+
+                if ($acao === 'excluir') {
+                    $id = (int)$_POST['id'];
+                    $del = $db->prepare("DELETE FROM bairros_delivery WHERE id = ? AND user_id = ?");
+                    $del->execute([$id, $userId]);
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => "Bairro removido com sucesso!"]);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
             }
 
-            if ($acao === 'excluir') {
-                $id = (int)$_POST['id'];
-                $del = $db->prepare("DELETE FROM bairros_delivery WHERE id = ? AND user_id = ?");
-                $del->execute([$id, $userId]);
-            }
-
-            header("Location: /" . $loja['user_virtual_env'] . "/admin?pagina=taxas");
+            header("Location: /" . $loja['user_virtual_env'] . "/admin?secao=taxas");
             exit;
         }
 
-        $stmt = $db->prepare("SELECT * FROM bairros_delivery WHERE user_id = ? ORDER BY bairro ASC");
+        $stmt = $db->prepare("SELECT id, user_id, uf, cidade, bairro, taxa FROM bairros_delivery WHERE user_id = ? ORDER BY bairro ASC");
         $stmt->execute([$userId]);
         $bairros = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -621,14 +745,18 @@ class LojistaController {
         require_once __DIR__ . "/../../views/{$pastaLogista}/horarios.php";
     }
 
-
     /**
-     * Gestão de Configurações da Loja (ws_empresa)
-     * Logo, Capa, WhatsApp, Nome, Endereço, Textos de Delivery
+     * Gestão de Configurações da Loja (ws_empresa) com Upload Blindado de Logo e Capa
+     * (Declarada APENAS UMA VEZ para evitar erro de Cannot Redeclare)
      */
     public function configuracoes(array $loja): void {
         $userId = (int)$loja['user_id'];
         $db = $this->db;
+
+        $uploadDir = __DIR__ . '/../../uploads';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0777, true);
+        }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nomeEmpresa   = trim($_POST['nome_empresa'] ?? '');
@@ -643,50 +771,48 @@ class LojistaController {
             $minimoPed     = (float)str_replace(',', '.', $_POST['minimo_delivery'] ?? '0');
             $taxaPadrao    = (float)str_replace(',', '.', $_POST['config_delivery'] ?? '0');
 
-            // Busca empresa atual para manter imagens se não houver upload novo
-            $stmtAtual = $db->prepare("SELECT img_logo, img_header FROM ws_empresa WHERE user_id = ? LIMIT 1");
+            $stmtAtual = $db->prepare("SELECT id_empresa, img_logo, img_header FROM ws_empresa WHERE user_id = ? LIMIT 1");
             $stmtAtual->execute([$userId]);
             $empAtual = $stmtAtual->fetch(PDO::FETCH_ASSOC);
 
             $imgLogo = $empAtual['img_logo'] ?? 'logo_default.png';
             $imgCapa = $empAtual['img_header'] ?? 'capa_default.png';
 
-            // Upload de Logo
-            if (!empty($_FILES['img_logo']['name'])) {
+            // Upload de Logotipo
+            if (!empty($_FILES['img_logo']['name']) && $_FILES['img_logo']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['img_logo']['name'], PATHINFO_EXTENSION));
                 $nomeArq = 'logo_' . $userId . '_' . time() . '.' . $ext;
-                $dest = __DIR__ . '/../../uploads/' . $nomeArq;
+                $dest = $uploadDir . '/' . $nomeArq;
                 if (move_uploaded_file($_FILES['img_logo']['tmp_name'], $dest)) {
+                    @chmod($dest, 0644);
                     $imgLogo = $nomeArq;
                 }
             }
 
             // Upload de Capa / Header
-            if (!empty($_FILES['img_header']['name'])) {
+            if (!empty($_FILES['img_header']['name']) && $_FILES['img_header']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['img_header']['name'], PATHINFO_EXTENSION));
                 $nomeArq = 'capa_' . $userId . '_' . time() . '.' . $ext;
-                $dest = __DIR__ . '/../../uploads/' . $nomeArq;
+                $dest = $uploadDir . '/' . $nomeArq;
                 if (move_uploaded_file($_FILES['img_header']['tmp_name'], $dest)) {
+                    @chmod($dest, 0644);
                     $imgCapa = $nomeArq;
                 }
             }
 
-            // Atualiza ou Insere na ws_empresa
-            $check = $db->prepare("SELECT id_empresa FROM ws_empresa WHERE user_id = ?");
-            $check->execute([$userId]);
-            if ($check->rowCount() > 0) {
+            if ($empAtual) {
                 $sql = "UPDATE ws_empresa SET 
                             nome_empresa = ?, descricao_empresa = ?, telefone_empresa = ?, email_empresa = ?,
                             end_rua_n_empresa = ?, end_bairro_empresa = ?, cidade_empresa = ?, end_uf_empresa = ?,
                             msg_tempo_delivery = ?, minimo_delivery = ?, config_delivery = ?,
                             img_logo = ?, img_header = ?
-                        WHERE user_id = ?";
+                        WHERE id_empresa = ?";
                 $up = $db->prepare($sql);
                 $up->execute([
                     $nomeEmpresa, $descricao, $telefone, $email,
                     $rua, $bairro, $cidade, $uf,
                     $tempoDelivery, $minimoPed, $taxaPadrao,
-                    $imgLogo, $imgCapa, $userId
+                    $imgLogo, $imgCapa, $empAtual['id_empresa']
                 ]);
             } else {
                 $sql = "INSERT INTO ws_empresa (
@@ -718,7 +844,6 @@ class LojistaController {
 
     /**
      * CRM de Clientes (ws_clientes)
-     * Filtros: Todos, Inativos (sem pedir há X dias), Aniversariantes do Dia e da Semana
      */
     public function clientes(array $loja): void {
         $userId = (int)$loja['user_id'];
@@ -726,19 +851,11 @@ class LojistaController {
 
         $filtro = trim($_GET['filtro'] ?? 'todos');
 
-        // Métricas Gerais de CRM
         $totalClientes = (int)$db->query("SELECT COUNT(*) FROM ws_clientes WHERE user_id_loja = {$userId}")->fetchColumn();
-
-        // Aniversariantes do dia
         $aniversariantesDia = (int)$db->query("SELECT COUNT(*) FROM ws_clientes WHERE user_id_loja = {$userId} AND DATE_FORMAT(data_nascimento, '%m-%d') = DATE_FORMAT(CURDATE(), '%m-%d')")->fetchColumn();
-
-        // Aniversariantes da semana
         $aniversariantesSemana = (int)$db->query("SELECT COUNT(*) FROM ws_clientes WHERE user_id_loja = {$userId} AND WEEK(data_nascimento, 1) = WEEK(CURDATE(), 1)")->fetchColumn();
-
-        // Clientes Inativos (+ de 30 dias sem pedir)
         $inativos30Dias = (int)$db->query("SELECT COUNT(*) FROM ws_clientes WHERE user_id_loja = {$userId} AND (ultima_visita < DATE_SUB(CURDATE(), INTERVAL 30 DAY) OR ultima_visita IS NULL)")->fetchColumn();
 
-        // Consulta filtrada para a tabela
         $sql = "SELECT c.*, 
                 (SELECT COUNT(*) FROM ws_pedidos p WHERE p.user_id = c.user_id_loja AND (p.cliente_id = c.cliente_id OR p.telefone = c.telefone)) as total_pedidos,
                 (SELECT COALESCE(SUM(total), 0) FROM ws_pedidos p WHERE p.user_id = c.user_id_loja AND (p.cliente_id = c.cliente_id OR p.telefone = c.telefone)) as total_gasto
@@ -762,10 +879,8 @@ class LojistaController {
         require_once __DIR__ . "/../../views/{$pastaLogista}/clientes.php";
     }
 
-
     /**
      * Gestão de Usuários da Equipe da Loja (ws_users)
-     * Limite: Até 3 usuários por lanchonete (o titular + 2 adicionais)
      */
     public function usuarios(array $loja): void {
         $slug = trim($loja['user_virtual_env']);
@@ -783,7 +898,7 @@ class LojistaController {
                     $email       = trim($_POST['user_email'] ?? '');
                     $senha       = trim($_POST['user_password'] ?? '');
                     $confirma    = trim($_POST['user_password_confirm'] ?? '');
-                    $nivel       = (int)($_POST['user_level'] ?? 1); // 1 = Comum, 2 = Motoboy, 3 = Admin
+                    $nivel       = (int)($_POST['user_level'] ?? 1);
                     $id          = (int)($_POST['user_id'] ?? 0);
 
                     if (empty($nome) || empty($email)) {
@@ -791,7 +906,6 @@ class LojistaController {
                     }
 
                     if ($id > 0) {
-                        // EDIÇÃO DE USUÁRIO
                         $chkEmail = $db->prepare("SELECT user_id FROM ws_users WHERE LOWER(user_email) = LOWER(?) AND user_id != ?");
                         $chkEmail->execute([$email, $id]);
                         if ($chkEmail->rowCount() > 0) {
@@ -817,7 +931,6 @@ class LojistaController {
                         $stmt->execute($params);
                         $msg = "Usuário \"{$nome}\" atualizado com sucesso!";
                     } else {
-                        // CADASTRO NOVO: Checa limite de 3 usuários
                         $stmtContagem = $db->prepare("SELECT COUNT(*) FROM ws_users WHERE user_virtual_env = ?");
                         $stmtContagem->execute([$slug]);
                         $totalUsuariosLoja = (int)$stmtContagem->fetchColumn();
@@ -826,7 +939,6 @@ class LojistaController {
                             throw new Exception("Limite atingido! Sua loja já possui {$totalUsuariosLoja} usuários cadastrados (limite de 3).");
                         }
 
-                        // Valida se o e-mail já existe
                         $chkEmail = $db->prepare("SELECT user_id FROM ws_users WHERE LOWER(user_email) = LOWER(?)");
                         $chkEmail->execute([$email]);
                         if ($chkEmail->rowCount() > 0) {
@@ -843,7 +955,6 @@ class LojistaController {
 
                         $senhaHash = Auth::hashSenha($senha);
 
-                        // Grava herdando o plano e com user_status = 'ativo' para garantir login
                         $sql = "INSERT INTO ws_users (
                                     user_name, user_lastname, user_virtual_env, user_email, user_cpf,
                                     user_telefone, user_img_perfil, user_password, user_level, user_plano,
@@ -896,12 +1007,132 @@ class LojistaController {
             exit;
         }
 
-        // Listagem de usuários
         $stmtUsers = $db->prepare("SELECT user_id, user_name, user_cpf, user_telefone, user_email, user_level, user_status, user_registration, user_ultimoacesso FROM ws_users WHERE user_virtual_env = ? ORDER BY user_id ASC");
         $stmtUsers->execute([$slug]);
         $usuarios = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
 
         $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
         require_once __DIR__ . "/../../views/{$pastaLogista}/usuarios.php";
+    }
+
+    /**
+     * Gestão e Criação de Vagas de Emprego da Lanchonete (ws_vagas)
+     */
+    public function vagas(array $loja): void {
+        $userId = (int)$loja['user_id'];
+        $db = $this->db;
+
+        // Garante que a tabela ws_vagas exista
+        try {
+            $db->exec("CREATE TABLE IF NOT EXISTS `ws_vagas` (
+                `id` INT(11) NOT NULL AUTO_INCREMENT,
+                `user_id` INT(11) NOT NULL,
+                `titulo` VARCHAR(255) NOT NULL,
+                `cargo` VARCHAR(150) NOT NULL,
+                `tipo_contratacao` VARCHAR(50) NOT NULL DEFAULT 'CLT',
+                `jornada_periodo` VARCHAR(100) NOT NULL DEFAULT 'Noturno',
+                `salario` DECIMAL(10,2) DEFAULT '0.00',
+                `salario_combinar` TINYINT(1) DEFAULT '0',
+                `descricao` TEXT,
+                `requisitos` TEXT,
+                `beneficios` VARCHAR(500) DEFAULT NULL,
+                `whatsapp_contato` VARCHAR(50) DEFAULT NULL,
+                `email_contato` VARCHAR(255) DEFAULT NULL,
+                `status` ENUM('ativa', 'pausada', 'preenchida') NOT NULL DEFAULT 'ativa',
+                `data_criacao` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_vagas_user` (`user_id`, `status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } catch (Exception $e) {}
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $acao = $_POST['acao'] ?? '';
+            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+            try {
+                if ($acao === 'salvar') {
+                    $id              = (int)($_POST['id_vaga'] ?? 0);
+                    $titulo          = trim($_POST['titulo'] ?? '');
+                    $cargo           = trim($_POST['cargo'] ?? 'Atendente');
+                    $tipoContratacao = trim($_POST['tipo_contratacao'] ?? 'CLT');
+                    $jornadaPeriodo  = trim($_POST['jornada_periodo'] ?? 'Noturno');
+                    $salarioCombinar = isset($_POST['salario_combinar']) ? 1 : 0;
+                    $salario         = $salarioCombinar ? 0.00 : (float)str_replace(',', '.', $_POST['salario'] ?? '0');
+                    $descricao       = trim($_POST['descricao'] ?? '');
+                    $requisitos      = trim($_POST['requisitos'] ?? '');
+                    $beneficios      = trim($_POST['beneficios'] ?? '');
+                    $whatsapp        = preg_replace('/\D/', '', $_POST['whatsapp_contato'] ?? ($loja['user_telefone'] ?? ''));
+                    $email           = trim($_POST['email_contato'] ?? ($loja['user_email'] ?? ''));
+                    $status          = trim($_POST['status'] ?? 'ativa');
+
+                    if (empty($titulo)) {
+                        throw new Exception("O título do anúncio da vaga é obrigatório!");
+                    }
+
+                    if ($id > 0) {
+                        $sql = "UPDATE ws_vagas SET 
+                                    titulo = ?, cargo = ?, tipo_contratacao = ?, jornada_periodo = ?,
+                                    salario = ?, salario_combinar = ?, descricao = ?, requisitos = ?,
+                                    beneficios = ?, whatsapp_contato = ?, email_contato = ?, status = ?
+                                WHERE id = ? AND user_id = ?";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([
+                            $titulo, $cargo, $tipoContratacao, $jornadaPeriodo,
+                            $salario, $salarioCombinar, $descricao, $requisitos,
+                            $beneficios, $whatsapp, $email, $status,
+                            $id, $userId
+                        ]);
+                        $msg = "Vaga \"{$titulo}\" atualizada com sucesso!";
+                    } else {
+                        $sql = "INSERT INTO ws_vagas (
+                                    user_id, titulo, cargo, tipo_contratacao, jornada_periodo,
+                                    salario, salario_combinar, descricao, requisitos, beneficios,
+                                    whatsapp_contato, email_contato, status
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([
+                            $userId, $titulo, $cargo, $tipoContratacao, $jornadaPeriodo,
+                            $salario, $salarioCombinar, $descricao, $requisitos, $beneficios,
+                            $whatsapp, $email, $status
+                        ]);
+                        $msg = "Vaga \"{$titulo}\" publicada com sucesso!";
+                    }
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => $msg]);
+                        exit;
+                    }
+                }
+
+                if ($acao === 'excluir') {
+                    $id = (int)$_POST['id'];
+                    $del = $db->prepare("DELETE FROM ws_vagas WHERE id = ? AND user_id = ?");
+                    $del->execute([$id, $userId]);
+
+                    if ($isAjax) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['sucesso' => true, 'mensagem' => "Vaga removida com sucesso!"]);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['sucesso' => false, 'mensagem' => $e->getMessage()]);
+                    exit;
+                }
+            }
+
+            header("Location: /" . $loja['user_virtual_env'] . "/admin?secao=vagas");
+            exit;
+        }
+
+        $stmtVagas = $db->prepare("SELECT * FROM ws_vagas WHERE user_id = ? ORDER BY id DESC");
+        $stmtVagas->execute([$userId]);
+        $vagas = $stmtVagas->fetchAll(PDO::FETCH_ASSOC);
+
+        $pastaLogista = is_dir(__DIR__ . '/../../views/admin_logista') ? 'admin_logista' : 'admin_lojista';
+        require_once __DIR__ . "/../../views/{$pastaLogista}/vagas.php";
     }
 }

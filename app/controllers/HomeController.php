@@ -41,8 +41,9 @@ class HomeController {
         $stmtProd->execute([$userId]);
         $produtos = $stmtProd->fetchAll(PDO::FETCH_CLASS);
 
-        // 4. Adicionais de Itens (ws_adicionais_itens)
-        $stmtAdic = $db->prepare("SELECT id_adicionais as Id, categorias_adicional, nome_adicional, valor_adicional, status_adicional FROM ws_adicionais_itens WHERE user_id = ? AND status_adicional = 1");
+        // 4. Adicionais de Itens & Molhos com Foto (ws_adicionais_itens)
+        // Busca todas as colunas incluindo img_adicional para os sachês e bisnagas
+        $stmtAdic = $db->prepare("SELECT *, id_adicionais as Id FROM ws_adicionais_itens WHERE user_id = ? AND status_adicional = 1");
         $stmtAdic->execute([$userId]);
         $adicionais = $stmtAdic->fetchAll(PDO::FETCH_CLASS);
 

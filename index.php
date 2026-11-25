@@ -5,6 +5,10 @@
  * Lojista: ws_users (user_email, user_password, user_virtual_env)
  * Cliente: ws_clientes (telefone, senha)
  */
+
+ini_set('pcre.jit', '0'); // Desativa o JIT para evitar o erro de alocação de memória
+
+
 session_start();
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
@@ -369,6 +373,9 @@ try {
         switch ($subSecao) {
             case 'produtos':
                 $lojistaCtrl->produtos($loja);
+                break;
+            case 'adicionais':
+                $lojistaCtrl->adicionais($loja);
                 break;
             case 'categorias':
                 $lojistaCtrl->categorias($loja);

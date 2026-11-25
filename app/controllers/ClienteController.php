@@ -88,8 +88,19 @@ class ClienteController {
     /**
      * Salva o Pedido na Base (ws_pedidos) via AJAX e gera o link do WhatsApp
      */
+    /**
+     * Salva o Pedido na Base (ws_pedidos) via AJAX de forma direta
+     * Inclui itens, adicionais por lanche e molhos/complementos da etapa final
+     */
+    /**
+     * Salva o Pedido na Base (ws_pedidos) via AJAX de forma direta
+     * Regras integradas:
+     * - Adicionais individuais por lanche
+     * - Molhos & Complementos do pedido com até 2 unidades como cortesia da casa
+     * - Notificação automática (view = 0) para o Kanban e alarme sonoro
+     */
     public function salvarPedido(array $loja): void {
-        // Limpa qualquer saída anterior para garantir JSON puro
+        // Limpa qualquer saída anterior no buffer para garantir JSON puro sem warnings
         if (ob_get_length()) ob_clean();
         header('Content-Type: application/json; charset=utf-8');
 
@@ -125,10 +136,10 @@ class ClienteController {
             $subtotal   = (float)($dados['subtotal'] ?? 0);
             $total      = (float)($dados['total'] ?? 0);
 
-            // Código do pedido único no padrão da tabela (ex: PED1126-4821)
+            // Código único do pedido no padrão da base (ex: PED1126-4821)
             $codigoPedido = 'PED' . date('my') . '-' . rand(100, 9999);
 
-            // Monta o resumo_pedidos formatado em HTML igual ao dump do banco
+            // 1. Monta o resumo_pedidos formatado em HTML com os itens e seus adicionais de lanche
             $resumoHtml = "";
             foreach ($dados['itens'] as $item) {
                 $itemNome = htmlspecialchars($item['nome']);
@@ -149,17 +160,52 @@ class ClienteController {
                 $resumoHtml .= "<b>OBS:</b> {$itemObs}<br /><br />";
             }
 
-            // Grava endereço se cliente logado
+            // 2. Adiciona a seção de Molhos do Pedido com o cálculo e detalhamento das 2 cortesias da casa
+            if (!empty($dados['molhos']) && is_array($dados['molhos'])) {
+                $resumoHtml .= "<b>--- MOLHOS / COMPLEMENTOS (Até 2 Cortesias) ---</b><br />";
+                $unidadesGratisAplicadas = 0;
+
+                foreach ($dados['molhos'] as $molho) {
+                    $mQtd  = (int)($molho['qtd'] ?? 1);
+                    $mNome = htmlspecialchars($molho['nome'] ?? 'Molho');
+                    $mVal  = (float)($molho['valor'] ?? 0);
+
+                    $qtdGratis = 0;
+                    $qtdPaga   = 0;
+
+                    for ($u = 0; $u < $mQtd; $u++) {
+                        if ($unidadesGratisAplicadas < 2) {
+                            $unidadesGratisAplicadas++;
+                            $qtdGratis++;
+                        } else {
+                            $qtdPaga++;
+                        }
+                    }
+
+                    if ($qtdGratis > 0 && $qtdPaga > 0) {
+                        $valTotalPago = number_format($qtdPaga * $mVal, 2, ',', '.');
+                        $resumoHtml .= "• <b>{$mQtd}x {$mNome}</b> ({$qtdGratis}x Cortesia + {$qtdPaga}x R$ {$valTotalPago})<br />";
+                    } elseif ($qtdGratis > 0) {
+                        $resumoHtml .= "• <b>{$mQtd}x {$mNome}</b> (Cortesia da Casa)<br />";
+                    } else {
+                        $valTotalPago = number_format($mQtd * $mVal, 2, ',', '.');
+                        $resumoHtml .= "• <b>{$mQtd}x {$mNome}</b> (+ R$ {$valTotalPago})<br />";
+                    }
+                }
+                $resumoHtml .= "<br />";
+            }
+
+            // Grava endereço se o cliente estiver logado
             if ($clienteId && !empty($rua)) {
                 try {
                     $stmtEnd = $this->db->prepare("INSERT INTO ws_clientes_enderecos (cliente_id, rua, numero, bairro, cidade, uf) VALUES (?, ?, ?, ?, ?, ?)");
                     $stmtEnd->execute([$clienteId, $rua, (string)$unidade, $bairro, $cidade, $uf]);
                 } catch (Exception $eEnd) {
-                    // Ignora erro secundário de endereço para não travar o pedido
+                    // Ignora falha secundária de histórico de endereço para não travar o fechamento do pedido
                 }
             }
 
-            // INSERT EXATO NAS COLUNAS DE ws_pedidos
+            // INSERT EXATO NAS COLUNAS DE ws_pedidos (view = 0 ativa alarme no Kanban do lojista)
             $sql = "INSERT INTO ws_pedidos (
                         user_id, cliente_id, codigo_pedido, data, data_chart, data_chart2,
                         resumo_pedidos, forma_pagamento, valor_troco, opcao_delivery, valor_taxa,

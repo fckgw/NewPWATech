@@ -9,10 +9,6 @@ $lojaTelefone = $empresaCupom['telefone_empresa'] ?? ($loja['user_telefone'] ?? 
 $lojaEndereco = trim(($empresaCupom['end_rua_n_empresa'] ?? '') . ' - ' . ($empresaCupom['end_bairro_empresa'] ?? '') . ', ' . ($empresaCupom['cidade_empresa'] ?? ''));
 
 $formasPagamentoLojista = $formasPagamentoLojista ?? [];
-$caixaAberto = $caixaAberto ?? null;
-$totaisCaixaTurno = $totaisCaixaTurno ?? ['dinheiro' => 0, 'pix' => 0, 'debito' => 0, 'credito' => 0, 'outros' => 0, 'total' => 0];
-
-$esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totaisCaixaTurno['dinheiro']) : 0;
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -37,16 +33,15 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
         .nav-link { color: #888ea8; border-radius: 12px; margin-bottom: 6px; padding: 12px 18px; font-weight: 600; transition: 0.3s; }
         .nav-link:hover, .nav-link.active { background: #34af23; color: #fff; }
 
-        .stat-card { background: var(--bg-card); border-radius: 20px; padding: 18px; border: 1px solid rgba(255,255,255,0.05); }
-        .card-caixa-status { background: linear-gradient(135deg, rgba(27, 46, 75, 0.9), rgba(14, 23, 38, 0.9)); border-radius: 20px; padding: 18px 22px; border: 1px solid rgba(255,255,255,0.08); }
+        .stat-card { background: var(--bg-card); border-radius: 20px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); }
 
         /* KANBAN COM SCROLL VERTICAL INDEPENDENTE */
         .kanban-col {
             background: rgba(27, 46, 75, 0.4);
             border-radius: 20px;
             padding: 16px;
-            height: calc(100vh - 365px);
-            min-height: 520px;
+            height: calc(100vh - 290px);
+            min-height: 550px;
             display: flex;
             flex-direction: column;
             border: 1px solid rgba(255,255,255,0.05);
@@ -83,8 +78,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
             html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; color: #000 !important; }
             body * { visibility: hidden; }
             #area-cupom-impressao, #area-cupom-impressao * { visibility: visible; }
-            #area-cupom-fechamento, #area-cupom-fechamento * { visibility: visible; }
-            #area-cupom-impressao, #area-cupom-fechamento {
+            #area-cupom-impressao {
                 position: absolute; left: 0; top: 0; width: 72mm; margin: 0 auto; padding: 4mm 2mm; font-family: 'Courier New', Courier, monospace; color: #000 !important; background: #fff !important;
             }
             .no-print { display: none !important; }
@@ -107,11 +101,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
             <div>
                 <div class="text-center mb-4">
                     <h5 class="fw-bold mb-0 text-white"><i class="fas fa-store text-success me-2"></i><?= htmlspecialchars($lojaNome) ?></h5>
-                    <?php if ($caixaAberto): ?>
-                        <span class="badge bg-success bg-opacity-25 text-success small mt-1 border border-success border-opacity-25">Caixa Aberto</span>
-                    <?php else: ?>
-                        <span class="badge bg-danger bg-opacity-25 text-danger small mt-1 border border-danger border-opacity-25">Caixa Fechado</span>
-                    <?php endif; ?>
+                    <span class="badge bg-success bg-opacity-20 text-success small mt-1">Loja Aberta</span>
                 </div>
 
                 <nav class="nav flex-column">
@@ -121,7 +111,6 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=taxas"><i class="fas fa-motorcycle me-2"></i> Taxas / Bairros</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=horarios"><i class="fas fa-clock me-2"></i> Horários</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=clientes"><i class="fas fa-users me-2"></i> Meus Clientes (CRM)</a>
-                    <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=usuarios"><i class="fas fa-user-shield me-2"></i> Equipe / Usuários</a>
                     <a class="nav-link" href="/<?= $loja['user_virtual_env'] ?>/admin?secao=configuracoes"><i class="fas fa-cog me-2"></i> Configurações</a>
                 </nav>
             </div>
@@ -138,50 +127,6 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
 
         <!-- ÁREA PRINCIPAL -->
         <main class="col-md-10 p-4">
-
-            <!-- ========================================================= -->
-            <!-- CARD DE CONTROLE DE CAIXA DIÁRIO (ABERTURA & FECHAMENTO) -->
-            <!-- ========================================================= -->
-            <div class="card-caixa-status mb-3 shadow">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
-                    <div>
-                        <div class="d-flex align-items-center gap-2 mb-1">
-                            <?php if ($caixaAberto): ?>
-                                <span class="badge bg-success p-2 rounded-circle"><i class="fas fa-cash-register text-white"></i></span>
-                                <h5 class="fw-bold mb-0 text-white">Caixa Aberto</h5>
-                                <span class="text-secondary small">| Aberto por <b><?= htmlspecialchars($caixaAberto['usuario_abertura_nome']) ?></b> às <?= date('H:i \d\e d/m', strtotime($caixaAberto['data_abertura'])) ?></span>
-                            <?php else: ?>
-                                <span class="badge bg-danger p-2 rounded-circle"><i class="fas fa-lock text-white"></i></span>
-                                <h5 class="fw-bold mb-0 text-white">Caixa Fechado</h5>
-                                <span class="text-secondary small">| Inicie o expediente registrando o dinheiro inicial (troco).</span>
-                            <?php endif; ?>
-                        </div>
-
-                        <?php if ($caixaAberto): ?>
-                            <div class="d-flex flex-wrap gap-3 small text-secondary mt-2">
-                                <div>Fundo Inicial: <b class="text-white">R$ <?= number_format((float)$caixaAberto['valor_inicial'], 2, ',', '.') ?></b></div>
-                                <div>Dinheiro Vendas: <b class="text-success">R$ <?= number_format($totaisCaixaTurno['dinheiro'], 2, ',', '.') ?></b></div>
-                                <div>Pix: <b class="text-info">R$ <?= number_format($totaisCaixaTurno['pix'], 2, ',', '.') ?></b></div>
-                                <div>Débito: <b class="text-warning">R$ <?= number_format($totaisCaixaTurno['debito'], 2, ',', '.') ?></b></div>
-                                <div>Crédito: <b class="text-primary">R$ <?= number_format($totaisCaixaTurno['credito'], 2, ',', '.') ?></b></div>
-                                <div>Total Esperado Gaveta: <b class="text-success fs-6">R$ <?= number_format($esperadoGaveta, 2, ',', '.') ?></b></div>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="d-flex gap-2">
-                        <?php if (!$caixaAberto): ?>
-                            <button type="button" class="btn btn-success rounded-pill fw-bold px-4 py-2" onclick="abrirModalAberturaCaixa()">
-                                <i class="fas fa-play me-1"></i> Abrir Caixa (Começar o Dia)
-                            </button>
-                        <?php else: ?>
-                            <button type="button" class="btn btn-danger rounded-pill fw-bold px-4 py-2" onclick="abrirModalFechamentoCaixa()">
-                                <i class="fas fa-stop me-1"></i> Fechar Caixa (Finalizar o Dia)
-                            </button>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
 
             <!-- STATS SUPERIORES -->
             <div class="row g-3 mb-3">
@@ -205,7 +150,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                 </div>
             </div>
 
-            <!-- FILTRO DE BUSCA -->
+            <!-- FILTRO DE BUSCA COM DATA INÍCIO E DATA FIM -->
             <div class="card bg-dark border-0 p-3 mb-3 rounded-4 shadow-sm">
                 <form method="GET" class="row g-2 align-items-center">
                     <div class="col-md-3">
@@ -304,6 +249,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                             <span class="badge bg-success rounded-pill"><?= count($faseFinalizado) ?></span>
                         </div>
                         
+                        <!-- BOTÃO QUE ABRE A TELA DE HISTÓRICO PASSADO -->
                         <button type="button" class="btn btn-outline-light btn-sm w-100 rounded-pill mb-2 fw-bold" onclick="abrirTelaHistorico()">
                             <i class="fas fa-history me-1"></i> Histórico Completo / PDF
                         </button>
@@ -323,186 +269,6 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
             </div>
 
         </main>
-    </div>
-</div>
-
-<!-- ========================================================= -->
-<!-- MODAL 1: ABERTURA DE CAIXA (COMEÇAR O DIA)               -->
-<!-- ========================================================= -->
-<div class="modal fade no-print" id="modalAberturaCaixa" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content bg-dark border-0 rounded-4 text-white shadow-lg p-4">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="fw-bold mb-0"><i class="fas fa-cash-register text-success me-2"></i>Abertura de Caixa</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <p class="text-secondary small mb-3">Informe o valor inicial disponível em gaveta (fundo de troco) para iniciar os trabalhos de hoje.</p>
-
-            <form id="formAberturaCaixa" onsubmit="enviarAberturaCaixaAjax(event)">
-                <input type="hidden" name="acao_caixa" value="abrir">
-
-                <div class="mb-3">
-                    <label class="small fw-bold text-secondary mb-1">VALOR INICIAL EM DINHEIRO (R$) *</label>
-                    <input type="text" name="valor_inicial" id="caixa_valor_inicial" class="form-control bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3 py-2 fs-5 text-center fw-bold text-success" placeholder="0,00" required>
-                </div>
-
-                <div class="p-3 bg-secondary bg-opacity-10 rounded-3 mb-4 small text-secondary">
-                    <i class="fas fa-info-circle me-1 text-info"></i> O valor inicial não será computado como receita de vendas. Ficará registrado como saldo inicial de gaveta.
-                </div>
-
-                <button type="submit" id="btnConfirmarAbertura" class="btn btn-success w-100 rounded-pill fw-bold py-3 shadow">
-                    <i class="fas fa-check me-1"></i> Confirmar Abertura do Caixa
-                </button>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- ========================================================= -->
-<!-- MODAL 2: FECHAMENTO DE CAIXA (FINALIZAR O DIA)           -->
-<!-- ========================================================= -->
-<div class="modal fade no-print" id="modalFechamentoCaixa" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content bg-dark border-0 rounded-4 text-white shadow-lg p-4">
-            <div class="d-flex justify-content-between align-items-center mb-3 border-bottom border-secondary pb-3">
-                <h5 class="fw-bold mb-0"><i class="fas fa-calculator text-danger me-2"></i>Fechamento de Caixa Diário</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-
-            <?php if ($caixaAberto): ?>
-                <div class="row g-3 mb-3">
-                    <div class="col-md-3">
-                        <div class="p-3 bg-secondary bg-opacity-10 rounded-3 text-center">
-                            <span class="small text-secondary fw-bold">FUNDO INICIAL</span>
-                            <h5 class="fw-bold text-white mb-0 mt-1">R$ <?= number_format((float)$caixaAberto['valor_inicial'], 2, ',', '.') ?></h5>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="p-3 bg-secondary bg-opacity-10 rounded-3 text-center">
-                            <span class="small text-secondary fw-bold">VENDAS DINHEIRO</span>
-                            <h5 class="fw-bold text-success mb-0 mt-1">R$ <?= number_format($totaisCaixaTurno['dinheiro'], 2, ',', '.') ?></h5>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="p-3 bg-secondary bg-opacity-10 rounded-3 text-center">
-                            <span class="small text-secondary fw-bold">VENDAS CARTÕES / PIX</span>
-                            <h5 class="fw-bold text-info mb-0 mt-1">R$ <?= number_format($totaisCaixaTurno['pix'] + $totaisCaixaTurno['debito'] + $totaisCaixaTurno['credito'], 2, ',', '.') ?></h5>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="p-3 bg-success bg-opacity-10 border border-success border-opacity-25 rounded-3 text-center">
-                            <span class="small text-success fw-bold">ESPERADO EM GAVETA</span>
-                            <h5 class="fw-bold text-success mb-0 mt-1">R$ <?= number_format($esperadoGaveta, 2, ',', '.') ?></h5>
-                        </div>
-                    </div>
-                </div>
-
-                <form id="formFechamentoCaixa" onsubmit="enviarFechamentoCaixaAjax(event)">
-                    <input type="hidden" name="acao_caixa" value="fechar">
-
-                    <div class="mb-3">
-                        <label class="small fw-bold text-secondary mb-1">CONTAGEM FÍSICA: QUANTIDADE DE DINHEIRO EM GAVETA (R$) *</label>
-                        <input type="text" name="valor_informado_fechamento" id="caixa_valor_informado" class="form-control bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3 py-2 fs-5 text-center fw-bold text-warning" placeholder="0,00" required onkeyup="calcularDiferencaConferencia(this.value, <?= $esperadoGaveta ?>)">
-                    </div>
-
-                    <div id="box-diferenca-caixa" class="p-3 rounded-3 mb-3 text-center small fw-bold" style="display:none;"></div>
-
-                    <div class="mb-4">
-                        <label class="small fw-bold text-secondary mb-1">OBSERVAÇÕES DO FECHAMENTO (OPCIONAL)</label>
-                        <textarea name="observacoes_fechamento" class="form-control bg-secondary bg-opacity-25 border-0 text-white rounded-3" rows="2" placeholder="Ex: Sangria realizada, troco em moedas conferido..."></textarea>
-                    </div>
-
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-warning text-dark rounded-pill fw-bold py-2 px-4" onclick="imprimirCupomFechamento()">
-                            <i class="fas fa-print me-1"></i> Imprimir Cupom de Fechamento (80mm)
-                        </button>
-                        <button type="submit" id="btnConfirmarFechamento" class="btn btn-danger flex-grow-1 rounded-pill fw-bold py-2 shadow">
-                            <i class="fas fa-check-circle me-1"></i> Confirmar Encerramento do Caixa
-                        </button>
-                    </div>
-                </form>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
-
-<!-- ========================================================= -->
-<!-- ÁREA DE IMPRESSÃO CUPOM FECHAMENTO DE CAIXA (80MM)       -->
-<!-- ========================================================= -->
-<div id="area-cupom-fechamento" style="display:none;">
-    <div class="cupom-termico">
-        <div class="titulo-loja"><?= htmlspecialchars($lojaNome) ?></div>
-        <div style="text-align: center; font-size: 11px;">
-            <?= htmlspecialchars($lojaEndereco) ?><br>
-            TEL/WHATS: <?= htmlspecialchars($lojaTelefone) ?>
-        </div>
-
-        <div class="divisor"></div>
-        <div style="text-align:center;" class="destaque">FECHAMENTO DE CAIXA DIARIO</div>
-        <div class="divisor"></div>
-
-        <?php if ($caixaAberto): ?>
-            <div>ABERTURA: <?= date('d/m/Y H:i', strtotime($caixaAberto['data_abertura'])) ?></div>
-            <div>RESP. ABERTURA: <?= htmlspecialchars($caixaAberto['usuario_abertura_nome']) ?></div>
-            <div>FECHAMENTO: <?= date('d/m/Y H:i') ?></div>
-            <div>RESP. FECHAMENTO: <?= htmlspecialchars($sessaoUserNome) ?></div>
-
-            <div class="divisor"></div>
-            <div style="text-align:center;">*** MOVIMENTACAO DE VALORES ***</div>
-
-            <div style="display:flex; justify-content:space-between;">
-                <span>FUNDO INICIAL (TROCO):</span>
-                <span>R$ <?= number_format((float)$caixaAberto['valor_inicial'], 2, ',', '.') ?></span>
-            </div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>VENDAS EM DINHEIRO:</span>
-                <span>R$ <?= number_format($totaisCaixaTurno['dinheiro'], 2, ',', '.') ?></span>
-            </div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>VENDAS EM PIX:</span>
-                <span>R$ <?= number_format($totaisCaixaTurno['pix'], 2, ',', '.') ?></span>
-            </div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>VENDAS EM DEBITO:</span>
-                <span>R$ <?= number_format($totaisCaixaTurno['debito'], 2, ',', '.') ?></span>
-            </div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>VENDAS EM CREDITO:</span>
-                <span>R$ <?= number_format($totaisCaixaTurno['credito'], 2, ',', '.') ?></span>
-            </div>
-            <?php if ($totaisCaixaTurno['outros'] > 0): ?>
-                <div style="display:flex; justify-content:space-between;">
-                    <span>OUTRAS FORMAS:</span>
-                    <span>R$ <?= number_format($totaisCaixaTurno['outros'], 2, ',', '.') ?></span>
-                </div>
-            <?php endif; ?>
-
-            <div class="divisor"></div>
-            <div style="display:flex; justify-content:space-between;" class="destaque">
-                <span>TOTAL VENDAS TURNO:</span>
-                <span>R$ <?= number_format($totaisCaixaTurno['total'], 2, ',', '.') ?></span>
-            </div>
-
-            <div class="divisor"></div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>ESPERADO EM GAVETA:</span>
-                <span>R$ <?= number_format($esperadoGaveta, 2, ',', '.') ?></span>
-            </div>
-            <div style="display:flex; justify-content:space-between;">
-                <span>CONTAGEM INFORMADA:</span>
-                <span id="cupom-fechamento-informado">R$ 0,00</span>
-            </div>
-            <div style="display:flex; justify-content:space-between;" class="destaque">
-                <span>DIFERENCA (SOBRA/FALTA):</span>
-                <span id="cupom-fechamento-diferenca">R$ 0,00</span>
-            </div>
-        <?php endif; ?>
-
-        <div class="divisor"></div>
-        <div style="text-align:center; font-size: 11px; margin-top: 5px;">
-            RELATORIO FISICO DE CONFERENCIA<br>
-            CARDAPIO DIGITAL PWA
-        </div>
     </div>
 </div>
 
@@ -526,6 +292,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
             </div>
 
             <div class="modal-body p-4">
+                <!-- Filtros do Histórico: DATA INÍCIO, DATA FIM, STATUS E FORMA DE PAGAMENTO DINÂMICA -->
                 <div class="card bg-black bg-opacity-40 border-0 p-3 mb-4 rounded-4">
                     <div class="row g-2 align-items-center">
                         <div class="col-md-2">
@@ -547,6 +314,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                                 <option value="Cancelado">Cancelados</option>
                             </select>
                         </div>
+                        <!-- NOVO FILTRO DINÂMICO DE FORMA DE PAGAMENTO BASEADO EM ws_formas_pagamento -->
                         <div class="col-md-3">
                             <label class="small text-secondary fw-bold">FORMA DE PAGAMENTO:</label>
                             <select id="hist_pgto" class="form-select bg-secondary bg-opacity-25 border-0 text-white rounded-pill px-3">
@@ -566,6 +334,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                     </div>
                 </div>
 
+                <!-- Resumo dos Valores do Período -->
                 <div class="row g-3 mb-4" id="cards-resumo-historico">
                     <div class="col-md-4">
                         <div class="stat-card">
@@ -587,6 +356,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
                     </div>
                 </div>
 
+                <!-- Tabela Completa do Histórico -->
                 <div class="card card-custom p-3 shadow" id="area-tabela-historico">
                     <div class="table-responsive">
                         <table class="table table-dark table-hover mb-0 align-middle">
@@ -678,7 +448,7 @@ $esperadoGaveta = $caixaAberto ? ((float)$caixaAberto['valor_inicial'] + $totais
     </div>
 </div>
 
-<!-- ÁREA DE IMPRESSÃO CUPOM TÉRMICO DO PEDIDO TOMATO 80MM (PAPEL) -->
+<!-- ÁREA DE IMPRESSÃO CUPOM TÉRMICO TOMATO 80MM (PAPEL) -->
 <div id="area-cupom-impressao" style="display:none;">
     <div class="cupom-termico">
         <div class="titulo-loja"><?= htmlspecialchars($lojaNome) ?></div>
@@ -798,145 +568,7 @@ function renderCardPedidoPro($p, $nomeLoja, $fase) {
 <script>
 let pedidoAbertoGlobal = null;
 let listaHistoricoCache = [];
-let modalAberturaInst = null;
-let modalFechamentoInst = null;
 
-// =========================================================
-// FUNÇÕES DE ABERTURA & FECHAMENTO DE CAIXA
-// =========================================================
-function abrirModalAberturaCaixa() {
-    document.getElementById('formAberturaCaixa').reset();
-    modalAberturaInst = new bootstrap.Modal(document.getElementById('modalAberturaCaixa'));
-    modalAberturaInst.show();
-}
-
-function abrirModalFechamentoCaixa() {
-    document.getElementById('caixa_valor_informado').value = '';
-    document.getElementById('box-diferenca-caixa').style.display = 'none';
-    modalFechamentoInst = new bootstrap.Modal(document.getElementById('modalFechamentoCaixa'));
-    modalFechamentoInst.show();
-}
-
-function calcularDiferencaConferencia(valInformado, esperado) {
-    const limpo = parseFloat(valInformado.replace(',', '.')) || 0;
-    const dif = limpo - esperado;
-    const box = document.getElementById('box-diferenca-caixa');
-
-    box.style.display = 'block';
-    if (dif === 0) {
-        box.className = 'p-3 rounded-3 mb-3 text-center small fw-bold bg-success bg-opacity-25 text-success border border-success border-opacity-25';
-        box.innerHTML = '<i class="fas fa-check-circle me-1"></i> CONFERÊNCIA EXATA! Nenhuma sobra ou falta.';
-    } else if (dif > 0) {
-        box.className = 'p-3 rounded-3 mb-3 text-center small fw-bold bg-info bg-opacity-25 text-info border border-info border-opacity-25';
-        box.innerHTML = `<i class="fas fa-arrow-up me-1"></i> SOBRA DE CAIXA: + R$ ${dif.toFixed(2).replace('.', ',')}`;
-    } else {
-        box.className = 'p-3 rounded-3 mb-3 text-center small fw-bold bg-danger bg-opacity-25 text-danger border border-danger border-opacity-25';
-        box.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i> FALTA NO CAIXA: - R$ ${Math.abs(dif).toFixed(2).replace('.', ',')}`;
-    }
-}
-
-function enviarAberturaCaixaAjax(e) {
-    e.preventDefault();
-    const btn = document.getElementById('btnConfirmarAbertura');
-    btn.disabled = true;
-
-    const formData = new FormData(document.getElementById('formAberturaCaixa'));
-
-    fetch(window.location.href, {
-        method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        body: formData
-    })
-    .then(r => r.json())
-    .then(res => {
-        btn.disabled = false;
-        if (res.sucesso) {
-            modalAberturaInst.hide();
-            Swal.fire({
-                icon: 'success',
-                title: 'Caixa Aberto!',
-                text: res.mensagem,
-                background: '#1b2e4b',
-                color: '#fff',
-                confirmButtonColor: '#34af23'
-            }).then(() => window.location.reload());
-        } else {
-            Swal.fire({
-                icon: 'error',
-                title: 'Atenção',
-                text: res.mensagem,
-                background: '#1b2e4b',
-                color: '#fff',
-                confirmButtonColor: '#ef4444'
-            });
-        }
-    })
-    .catch(() => {
-        btn.disabled = false;
-        window.location.reload();
-    });
-}
-
-function enviarFechamentoCaixaAjax(e) {
-    e.preventDefault();
-    const btn = document.getElementById('btnConfirmarFechamento');
-    btn.disabled = true;
-
-    const formData = new FormData(document.getElementById('formFechamentoCaixa'));
-
-    fetch(window.location.href, {
-        method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        body: formData
-    })
-    .then(r => r.json())
-    .then(res => {
-        btn.disabled = false;
-        if (res.sucesso) {
-            modalFechamentoInst.hide();
-            Swal.fire({
-                icon: 'success',
-                title: 'Caixa Encerrado!',
-                html: `<p>${res.mensagem}</p>
-                       <p class="small text-secondary mb-0">Total Informado: <b>R$ ${parseFloat(res.informado).toFixed(2)}</b><br>Diferença Final: <b>R$ ${parseFloat(res.diferenca).toFixed(2)}</b></p>`,
-                background: '#1b2e4b',
-                color: '#fff',
-                confirmButtonColor: '#34af23'
-            }).then(() => window.location.reload());
-        } else {
-            Swal.fire({
-                icon: 'error',
-                title: 'Erro',
-                text: res.mensagem,
-                background: '#1b2e4b',
-                color: '#fff',
-                confirmButtonColor: '#ef4444'
-            });
-        }
-    })
-    .catch(() => {
-        btn.disabled = false;
-        window.location.reload();
-    });
-}
-
-function imprimirCupomFechamento() {
-    const informado = parseFloat((document.getElementById('caixa_valor_informado').value || '0').replace(',', '.')) || 0;
-    const esperado = <?= (float)$esperadoGaveta ?>;
-    const dif = informado - esperado;
-
-    document.getElementById('cupom-fechamento-informado').innerText = 'R$ ' + informado.toFixed(2).replace('.', ',');
-    document.getElementById('cupom-fechamento-diferenca').innerText = (dif >= 0 ? '+ ' : '- ') + 'R$ ' + Math.abs(dif).toFixed(2).replace('.', ',');
-
-    const areaCupom = document.getElementById('area-cupom-fechamento');
-    areaCupom.style.display = 'block';
-    window.print();
-    areaCupom.style.display = 'none';
-}
-
-// =========================================================
-// FUNÇÕES KANBAN, IMPRESSÃO DE PEDIDOS & HISTÓRICO
-// =========================================================
 function abrirModalDetalhes(p) {
     pedidoAbertoGlobal = p;
 
@@ -1017,6 +649,9 @@ function avancarFaseENotificar(pedidoId, novoStatus, telefone, cliente, codigo, 
     });
 }
 
+// ===================================================================
+// ROTINAS DA TELA DE HISTÓRICO PASSADO (COM NOVO FILTRO DE PGTO)
+// ===================================================================
 function abrirTelaHistorico() {
     new bootstrap.Modal(document.getElementById('modalHistoricoPedidos')).show();
     carregarHistoricoAjax();
@@ -1026,7 +661,7 @@ function carregarHistoricoAjax() {
     const dtIni  = document.getElementById('hist_dt_ini').value;
     const dtFim  = document.getElementById('hist_dt_fim').value;
     const status = document.getElementById('hist_status').value;
-    const pgto   = document.getElementById('hist_pgto').value;
+    const pgto   = document.getElementById('hist_pgto').value; // Captura do filtro de pgto
 
     const url = window.location.pathname + `?ajax_historico=1&dt_ini=${dtIni}&dt_fim=${dtFim}&status_hist=${encodeURIComponent(status)}&pgto_hist=${encodeURIComponent(pgto)}`;
 
@@ -1094,6 +729,7 @@ function imprimirCupomHistorico(p) {
     imprimirCupomAtual();
 }
 
+// GERA O RELATÓRIO FORMATADO EM PDF COM FORMA DE PGTO INCLUSA
 function exportarRelatorioPDF() {
     const dtIni  = document.getElementById('hist_dt_ini').value;
     const dtFim  = document.getElementById('hist_dt_fim').value;
